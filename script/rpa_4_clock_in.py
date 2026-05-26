@@ -9,8 +9,8 @@ from utils.holiday_checker import is_holiday_or_weekend
 from utils.group2_checker import check_group2_attendance
 
 # 文件路径
-INPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_project/files/4月办公室打卡.xls"
-OUTPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_project/files/四月打卡异常.xlsx"
+INPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/4月办公室打卡.xls"
+OUTPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/四月打卡异常.xlsx"
 
 # 考勤规则
 WORK_START_TIME = time(8, 33, 59)
