@@ -5,7 +5,7 @@ import sys
 
 # 添加项目根目录到系统路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.holiday_checker import is_holiday_or_weekend
+from utils.holiday_checker import is_holiday_or_weekend, get_overtime_missing_card_type
 from utils.group2_checker import check_group2_attendance
 
 # 文件路径
@@ -31,10 +31,8 @@ def check_missing_card(name, date, emp_id, times, record_count):
         if record_count == 1:
             clock_time = times[0]
             
-            # 判断是否为节假日或周末
-            if is_holiday_or_weekend(date):
-                anomaly_type = '周末加班缺卡'
-            else:
+            anomaly_type = get_overtime_missing_card_type(date)
+            if anomaly_type is None:
                 if clock_time < time(12, 0):
                     anomaly_type = '无打下班卡'
                 else:
@@ -59,13 +57,12 @@ def check_missing_card_default(name, date, emp_id, times, record_count):
     
     # 打卡次数为单数（1 或 3），缺卡
     if record_count in [1, 3]:
-        # 判断是否为节假日或周末
-        is_weekend_holiday = is_holiday_or_weekend(date)
+        overtime_missing_card_type = get_overtime_missing_card_type(date)
         
         if record_count == 1:
             clock_time = times[0]
-            if is_weekend_holiday:
-                anomaly_type = '周末加班缺卡'
+            if overtime_missing_card_type:
+                anomaly_type = overtime_missing_card_type
             else:
                 if clock_time < time(12, 0):
                     anomaly_type = '无打下班卡'
@@ -81,7 +78,7 @@ def check_missing_card_default(name, date, emp_id, times, record_count):
             })
         elif record_count == 3:
             first_time = times[0]
-            anomaly_type = '周末加班缺卡' if is_weekend_holiday else '缺卡'
+            anomaly_type = overtime_missing_card_type or '缺卡'
             
             anomalies.append({
                 '姓名': name,

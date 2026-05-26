@@ -13,6 +13,14 @@ def is_holiday_or_weekend(date):
     """
     return calendar.is_holiday(date)
 
+def get_overtime_missing_card_type(date):
+    """获取节假日/周末缺卡异常类型，节假日优先。"""
+    if get_holiday_name(date):
+        return '节假日加班缺卡'
+    if is_holiday_or_weekend(date):
+        return '周末加班缺卡'
+    return None
+
 def is_workday(date):
     """
     判断指定日期是否为工作日
