@@ -45,7 +45,7 @@ def check_group2_attendance(name, date, emp_id, punch_times):
     noon_end = base_date.replace(hour=13, minute=30)
     evening_start = base_date.replace(hour=17, minute=30)
     evening_end = base_date.replace(hour=19, minute=35)
-    overtime_threshold = base_date.replace(hour=19, minute=36)
+    overtime_threshold = base_date.replace(hour=19, minute=30)
 
     # 开始识别每张卡
     used_indices = set()
@@ -93,7 +93,7 @@ def check_group2_attendance(name, date, emp_id, punch_times):
 
     # 6. 识别加班下班卡（>19:00）
     for i, pt in enumerate(punch_datetimes):
-        if i not in used_indices and pt > overtime_threshold:
+        if i not in used_indices and pt >= overtime_threshold:
             identified_cards['加班下班卡'] = pt
             used_indices.add(i)
             break
