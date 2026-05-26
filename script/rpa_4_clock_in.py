@@ -5,7 +5,7 @@ import sys
 
 # 添加项目根目录到系统路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.holiday_checker import is_holiday_or_weekend, get_overtime_missing_card_type
+from utils.holiday_checker import is_holiday_or_weekend, get_overtime_missing_card_type, is_workday
 from utils.group2_checker import check_group2_attendance
 
 # 文件路径
@@ -116,6 +116,30 @@ def check_late_early(name, date, emp_id, times, record_count):
             })
     return anomalies
 
+def check_absence(df):
+    """工作日零打卡记为缺勤"""
+    anomalies = []
+    employees = df[['姓名', '编号']].drop_duplicates()
+    start_date = df['日期'].min()
+    end_date = df['日期'].max()
+    punched_days = set(df.groupby(['姓名', '日期', '编号']).groups.keys())
+
+    for _, row in employees.iterrows():
+        name, emp_id = row['姓名'], row['编号']
+        for day in pd.date_range(start_date, end_date):
+            date = day.date()
+            if not is_workday(date):
+                continue
+            if (name, date, emp_id) not in punched_days:
+                anomalies.append({
+                    '姓名': name,
+                    '日期': date,
+                    '编号': emp_id,
+                    '打卡时间': '',
+                    '考勤异常情况': '缺勤'
+                })
+    return anomalies
+
 def analyze_attendance():
     """分析考勤异常情况"""
     try:
@@ -197,6 +221,9 @@ def analyze_attendance():
             else:
                 # 工作日，检查迟到早退
                 anomalies.extend(check_late_early(name, date, emp_id, times, record_count))
+
+    print("检查工作日缺勤（零打卡）...")
+    anomalies.extend(check_absence(df))
     
     if anomalies:
         result_df = pd.DataFrame(anomalies)
