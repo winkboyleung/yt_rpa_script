@@ -2,6 +2,7 @@ import pandas as pd
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Alignment, Font, Border, Side
+from openpyxl.comments import Comment
 import os
 import sys
 
@@ -113,19 +114,25 @@ def generate_attendance_report():
     ws['A3'].alignment = center_align
     ws['A3'].font = header_font
     ws['A3'].border = thin_border
+    ws['A4'].border = thin_border  # 给被合并的下半部分也设置边框
     
     ws.merge_cells('B3:B4')
     ws['B3'] = "姓名"
     ws['B3'].alignment = center_align
     ws['B3'].font = header_font
     ws['B3'].border = thin_border
+    ws['B4'].border = thin_border  # 给被合并的下半部分也设置边框
     
     ws.merge_cells('C3:C4')
     ws['C3'] = ""
     ws['C3'].border = thin_border
+    ws['C4'].border = thin_border  # 给被合并的下半部分也设置边框
     
     ws.row_dimensions[3].height = 25
     ws.row_dimensions[4].height = 25
+    
+    # 冻结前4行，使表头在滚动时保持可见
+    ws.freeze_panes = 'A5'
     
     # 写入日期列（1-31），从D列开始
     for day in range(1, days_in_month + 1):
@@ -152,15 +159,21 @@ def generate_attendance_report():
         # 获取该员工的打卡日期
         emp_punch_dates = set(punch_df[punch_df['姓名'] == name]['日期'])
         
-        # 获取该员工的异常记录
+        # 获取该员工的异常记录（保留完整信息用于批注）
         emp_anomalies = {}
+        emp_anomaly_details = {}  # 保存详细信息
         if not anomaly_df.empty:
             emp_anomaly_records = anomaly_df[anomaly_df['姓名'] == name]
             for _, anomaly in emp_anomaly_records.iterrows():
                 date = anomaly['日期']
                 if date not in emp_anomalies:
                     emp_anomalies[date] = []
+                    emp_anomaly_details[date] = []
                 emp_anomalies[date].append(anomaly['考勤异常情况'])
+                emp_anomaly_details[date].append({
+                    '时间': anomaly.get('打卡时间', ''),
+                    '异常': anomaly['考勤异常情况']
+                })
         
         # 设置行高
         ws.row_dimensions[current_row].height = 20
@@ -172,6 +185,8 @@ def generate_attendance_report():
         cell_seq.alignment = center_align
         cell_seq.font = normal_font
         cell_seq.border = thin_border
+        # 给被合并的下半部分也设置边框
+        ws.cell(current_row+1, 1).border = thin_border
         
         # 姓名（跨两行）
         ws.merge_cells(start_row=current_row, start_column=2, end_row=current_row+1, end_column=2)
@@ -179,6 +194,8 @@ def generate_attendance_report():
         cell_name.alignment = center_align
         cell_name.font = normal_font
         cell_name.border = thin_border
+        # 给被合并的下半部分也设置边框
+        ws.cell(current_row+1, 2).border = thin_border
         
         # 第1行：正常出勤
         cell_label = ws.cell(current_row, 3, "正常出勤")
@@ -202,16 +219,27 @@ def generate_attendance_report():
             
             # 判断是否有异常
             if date in emp_anomalies:
-                # 如果异常类型包含"缺勤"，显示"缺勤"
+                # 如果异常类型包含"缺勤"，显示"缺"
                 if any('缺勤' in a for a in emp_anomalies[date]):
                     cell.value = "缺"
                 else:
                     cell.value = "异"
-            elif date in emp_punch_dates:
+                
+                # 添加批注显示详细异常信息
+                comment_lines = []
+                for detail in emp_anomaly_details[date]:
+                    time_str = detail['时间']
+                    anomaly_type = detail['异常']
+                    comment_lines.append(f"{date.strftime('%Y/%m/%d')}\n{time_str}\n{anomaly_type}")
+                cell.comment = Comment('\n\n'.join(comment_lines), "系统")
+                
+            elif date in emp_punch_dates and not is_holiday_or_weekend(date):
                 cell.value = "√"
             elif is_workday(date):
                 # 工作日无打卡=缺勤
                 cell.value = "缺"
+                # 添加批注
+                cell.comment = Comment(f"{date.strftime('%Y/%m/%d')}\n\n缺勤", "系统")
         
         # 第2行：加班工时
         current_row += 1
