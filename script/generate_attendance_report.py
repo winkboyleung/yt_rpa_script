@@ -8,11 +8,72 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.holiday_checker import is_holiday_or_weekend, is_workday
+from utils.workday_overtime import TARGET_WORKDAY_OVERTIME_EMPLOYEES, calc_workday_overtime
+from utils.workday_overtime import TARGET_WORKDAY_OVERTIME_EMPLOYEES, calc_workday_overtime
 
 # 文件路径
 PUNCH_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/4月办公室打卡.xls"
 ANOMALY_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/四月打卡异常.xlsx"
 OUTPUT_DIR = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files"
+
+
+def _time_to_minutes(t):
+    return t.hour * 60 + t.minute
+
+
+def _round_clock_in_forward(t):
+    """
+    上班卡取整到半点：
+    - 早上早于8:30的打卡，一律按8:30计（7:45、7:59→8:30）
+    - 若距离“上一半点”小于5分钟，则仍归到上一半点（9:34→9:30，10:03→10:00）
+    - 否则归到下一半点（8:25→8:30，9:55→10:00）
+    """
+    mins = _time_to_minutes(t)
+    if mins < 8 * 60 + 30:
+        return 8 * 60 + 30
+    remainder = mins % 30
+    if remainder == 0:
+        return mins
+    if remainder < 5:
+        return mins - remainder
+    return (mins // 30 + 1) * 30
+
+
+def _round_clock_out_backward(t):
+    """下班卡向后取整到半点（17:25→17:00，18:11→18:00）"""
+    mins = _time_to_minutes(t)
+    return (mins // 30) * 30
+
+
+def calc_weekend_overtime_two_punches(clock_in, clock_out):
+    """
+    周末/节假日、两次打卡的加班工时。
+    下班(向后取整) - 上班(向前取整)；
+    >5小时减1小时午餐（上班>=11:00不扣）；
+    或者原始上班<11:00且原始下班>14:00时，也减1小时午餐（上班>=11:00不扣）。
+    """
+    start = _round_clock_in_forward(clock_in)
+    end = _round_clock_out_backward(clock_out)
+    if end <= start:
+        return None
+    hours = (end - start) / 60.0
+    # 上班 >= 11:00 视为已吃过午饭，不再扣午餐1小时
+    need_lunch_deduction = _time_to_minutes(clock_in) < 11 * 60 and (
+        hours > 5
+        or _time_to_minutes(clock_out) > 14 * 60
+    )
+    if need_lunch_deduction:
+        hours -= 1
+    # 下班时间 > 19:30，额外减0.5小时晚餐
+    if _time_to_minutes(clock_out) > 19 * 60 + 30:
+        hours -= 0.5
+    return hours
+
+
+def _format_overtime_hours(hours):
+    if hours == int(hours):
+        return int(hours)
+    return hours
 
 
 def generate_attendance_report():
@@ -30,6 +91,7 @@ def generate_attendance_report():
     
     punch_df['日期时间'] = pd.to_datetime(punch_df['日期时间'])
     punch_df['日期'] = punch_df['日期时间'].dt.date
+    punch_df['打卡时间'] = punch_df['日期时间'].dt.time
     
     # 读取异常记录（如果文件不存在或读取失败，创建空DataFrame）
     anomaly_df = pd.DataFrame()
@@ -156,8 +218,12 @@ def generate_attendance_report():
         name = emp_row['姓名']
         emp_id = emp_row['编号']
         
-        # 获取该员工的打卡日期
-        emp_punch_dates = set(punch_df[punch_df['姓名'] == name]['日期'])
+        emp_records = punch_df[punch_df['姓名'] == name]
+        emp_punch_dates = set(emp_records['日期'])
+        # 按日期汇总打卡时间（已排序）
+        emp_punches_by_date = {}
+        for date, group in emp_records.groupby('日期'):
+            emp_punches_by_date[date] = sorted(group['打卡时间'].tolist())
         
         # 获取该员工的异常记录（保留完整信息用于批注）
         emp_anomalies = {}
@@ -248,7 +314,7 @@ def generate_attendance_report():
         cell_label2.font = normal_font
         cell_label2.border = thin_border
         
-        # 加班工时行的日期单元格也要加阴影
+        # 加班工时行
         for day in range(1, days_in_month + 1):
             col_idx = 3 + day
             date = datetime(year, month, day).date()
@@ -258,6 +324,23 @@ def generate_attendance_report():
             cell.alignment = center_align
             if is_holiday_or_weekend(date):
                 cell.fill = gray_fill
+                day_times = emp_punches_by_date.get(date, [])
+                if len(day_times) == 2:
+                    hours = calc_weekend_overtime_two_punches(day_times[0], day_times[1])
+                    if hours is not None and hours > 0:
+                        cell.value = _format_overtime_hours(hours)
+                        # 避免 Excel 将 10.5 显示成 11（自动四舍五入/整数格式）
+                        cell.number_format = "0.##"
+            else:
+                # 工作日加班：仅统计指定名单员工
+                if name in TARGET_WORKDAY_OVERTIME_EMPLOYEES:
+                    day_times = emp_punches_by_date.get(date, [])
+                    result = calc_workday_overtime(day_times)
+                    if result["status"] == "正常" and result["hours"] is not None and result["hours"] > 0:
+                        cell.value = _format_overtime_hours(result["hours"])
+                        cell.number_format = "0.##"
+                    elif result["status"] == "异常":
+                        cell.value = "异常"
         
         current_row += 1
         seq_num += 1
