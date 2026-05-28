@@ -71,9 +71,11 @@ def calc_weekend_overtime_two_punches(clock_in, clock_out):
 
 
 def _format_overtime_hours(hours):
-    if hours == int(hours):
-        return int(hours)
-    return hours
+    # 统一格式化，避免出现 "8." 这类尾点显示
+    text = f"{round(hours, 2):.2f}".rstrip("0")
+    if text.endswith("."):
+        text = text[:-1]
+    return text
 
 
 def generate_attendance_report():
@@ -329,8 +331,6 @@ def generate_attendance_report():
                     hours = calc_weekend_overtime_two_punches(day_times[0], day_times[1])
                     if hours is not None and hours > 0:
                         cell.value = _format_overtime_hours(hours)
-                        # 避免 Excel 将 10.5 显示成 11（自动四舍五入/整数格式）
-                        cell.number_format = "0.##"
             else:
                 # 工作日加班：仅统计指定名单员工
                 if name in TARGET_WORKDAY_OVERTIME_EMPLOYEES:
@@ -338,9 +338,8 @@ def generate_attendance_report():
                     result = calc_workday_overtime(day_times)
                     if result["status"] == "正常" and result["hours"] is not None and result["hours"] > 0:
                         cell.value = _format_overtime_hours(result["hours"])
-                        cell.number_format = "0.##"
                     elif result["status"] == "异常":
-                        cell.value = "异常"
+                        cell.value = "异"
         
         current_row += 1
         seq_num += 1
