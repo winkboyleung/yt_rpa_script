@@ -2,6 +2,7 @@ import pandas as pd
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Alignment, Font, Border, Side
+from openpyxl.utils import column_index_from_string, range_boundaries
 from openpyxl.comments import Comment
 import os
 import sys
@@ -81,6 +82,159 @@ def _format_overtime_hours(hours):
     return text
 
 
+STATS_COL_START = 35  # AI列
+STATS_COL_END = 57    # BE列
+
+# 统计区列宽：竖排表头列宜窄且同组等宽，避免 AN/AU/BA 等过宽导致参差不齐
+STATS_COL_WIDTHS = {
+    "AI": 6.0, "AJ": 5.0, "AK": 4.75, "AL": 6.25,
+    "AM": 4.0, "AN": 4.0, "AO": 4.0, "AP": 4.0, "AQ": 4.0,
+    "AR": 4.25, "AS": 4.25, "AT": 4.25,
+    "AU": 4.25, "AV": 5.5,
+    "AW": 4.75, "AX": 5.75,
+    "AY": 5.875, "AZ": 4.5, "BA": 4.75,
+    "BB": 10.25, "BC": 6.25, "BD": 10.75, "BE": 4.75,
+}
+
+
+def _style_cell(cell, font, alignment, border):
+    cell.font = font
+    cell.alignment = alignment
+    cell.border = border
+
+
+def _thin_border_sides(top=False, bottom=False, left=False, right=False):
+    side = Side(style="thin")
+    none = Side()
+    return Border(
+        top=side if top else none,
+        bottom=side if bottom else none,
+        left=side if left else none,
+        right=side if right else none,
+    )
+
+
+def _full_thin_border():
+    return _thin_border_sides(top=True, bottom=True, left=True, right=True)
+
+
+def _apply_horizontal_merge_borders(ws, row, min_col, max_col):
+    """单行横向合并：顶底边铺满，左右边仅在最外侧单元格。"""
+    for col in range(min_col, max_col + 1):
+        ws.cell(row, col).border = _thin_border_sides(
+            top=True,
+            bottom=True,
+            left=(col == min_col),
+            right=(col == max_col),
+        )
+
+
+def _apply_vertical_merge_borders(ws, col, min_row, max_row):
+    """单列纵向合并：上格四边，下格底+左右。"""
+    for row in range(min_row, max_row + 1):
+        if row == min_row:
+            ws.cell(row, col).border = _full_thin_border()
+        else:
+            ws.cell(row, col).border = _thin_border_sides(bottom=True, left=True, right=True)
+
+
+def _apply_merge_range_borders(ws, merge_range):
+    min_col, min_row, max_col, max_row = range_boundaries(merge_range)
+    if min_row == max_row:
+        _apply_horizontal_merge_borders(ws, min_row, min_col, max_col)
+    elif min_col == max_col:
+        _apply_vertical_merge_borders(ws, min_col, min_row, max_row)
+    else:
+        for row in range(min_row, max_row + 1):
+            for col in range(min_col, max_col + 1):
+                ws.cell(row, col).border = _full_thin_border()
+
+
+def _vertical_header_align():
+    """Excel 竖排文字（自上而下）。"""
+    return Alignment(horizontal="center", vertical="center", text_rotation=255, wrap_text=True)
+
+
+def _setup_stats_headers(ws, workdays, header_font, center_align):
+    """右侧统计区表头（仅样式，不填数据）。"""
+    ws.row_dimensions[3].height = 47.25
+    ws.row_dimensions[4].height = 69.75
+    vertical_align = _vertical_header_align()
+    unit_bottom_align = Alignment(horizontal="center", vertical="bottom", wrap_text=True)
+    full_border = _full_thin_border()
+
+    stats_merges_row3 = [
+        ("AI3:AL3", f"正常出勤({workdays}天)"),
+        ("AM3:AQ3", "缺勤(天)"),
+        ("AR3:AT3", "加班工时\n(H)"),
+        ("AU3:AV3", "上月余加班工时\n(H)"),
+        ("AW3:AX3", "剩余加班工时\n(H)"),
+    ]
+    for merge_range, title in stats_merges_row3:
+        ws.merge_cells(merge_range)
+        cell = ws[merge_range.split(":")[0]]
+        cell.value = title
+        align = unit_bottom_align if "\n(H)" in title else center_align
+        _style_cell(cell, header_font, align, full_border)
+        _apply_merge_range_borders(ws, merge_range)
+
+    stats_merges_vertical = [
+        ("AY3:AY4", "合计天数"),
+        ("AZ3:AZ4", "夜班餐补天数"),
+        ("BA3:BA4", "剩余年假\n(H)"),
+        ("BB3:BB4", "确认签名"),
+        ("BC3:BC4", "备注"),
+        ("BD3:BD4", "入职日期"),
+        ("BE3:BE4", "工龄"),
+    ]
+    for merge_range, title in stats_merges_vertical:
+        ws.merge_cells(merge_range)
+        top_left = merge_range.split(":")[0]
+        cell = ws[top_left]
+        cell.value = title
+        _style_cell(cell, header_font, vertical_align, full_border)
+        _apply_merge_range_borders(ws, merge_range)
+
+    row4_headers = {
+        35: "实际出勤",
+        36: "调休\n(h)",
+        37: "年休假\n(h)",
+        38: "合计",
+        39: "事假",
+        40: "病假",
+        41: "婚丧产",
+        42: "工伤",
+        43: "旷工",
+        44: "平时",
+        45: "休息日",
+        46: "节假日",
+        47: "平时",
+        48: "周六日",
+        49: "平时",
+        50: "周六日",
+    }
+    for col, title in row4_headers.items():
+        cell = ws.cell(4, col, title)
+        _style_cell(cell, header_font, vertical_align, full_border)
+
+    for col_letter, width in STATS_COL_WIDTHS.items():
+        ws.column_dimensions[col_letter].width = width
+
+
+def _merge_stats_cells_for_employee(ws, start_row, end_row, normal_font, center_align):
+    """右侧统计栏与序号/姓名一致：每位员工占两行，每列纵向合并。"""
+    for col in range(STATS_COL_START, STATS_COL_END + 1):
+        ws.merge_cells(
+            start_row=start_row,
+            start_column=col,
+            end_row=end_row,
+            end_column=col,
+        )
+        cell = ws.cell(start_row, col)
+        _style_cell(cell, normal_font, center_align, _full_thin_border())
+        _apply_vertical_merge_borders(ws, col, start_row, end_row)
+
+
 def generate_attendance_report():
     """生成考勤统计表"""
     
@@ -152,7 +306,7 @@ def generate_attendance_report():
     header_font = Font(name='宋体', size=11)
     
     # 第1行：大标题
-    ws.merge_cells('A1:AH1')
+    ws.merge_cells('A1:BE1')
     ws['A1'] = f"{year}年{month}月份考勤确认表"
     ws['A1'].font = title_font
     ws['A1'].alignment = center_align
@@ -168,7 +322,7 @@ def generate_attendance_report():
     ws['K2'].font = header_font
     ws['K2'].alignment = center_align
     
-    ws.merge_cells('X2:AH2')
+    ws.merge_cells('X2:BE2')
     ws['X2'] = "注：阴影部份为周六日出勤情况"
     ws['X2'].font = header_font
     ws['X2'].alignment = Alignment(horizontal='right', vertical='center')
@@ -176,30 +330,28 @@ def generate_attendance_report():
     ws.row_dimensions[2].height = 20
     
     # 第3-4行：表头
+    vertical_align = _vertical_header_align()
     ws.merge_cells('A3:A4')
     ws['A3'] = "序号"
-    ws['A3'].alignment = center_align
+    ws['A3'].alignment = vertical_align
     ws['A3'].font = header_font
-    ws['A3'].border = thin_border
-    ws['A4'].border = thin_border  # 给被合并的下半部分也设置边框
-    
+    _apply_merge_range_borders(ws, 'A3:A4')
+
     ws.merge_cells('B3:B4')
-    ws['B3'] = "姓名"
+    ws['B3'] = "        日期\n\n 姓名"
     ws['B3'].alignment = center_align
     ws['B3'].font = header_font
-    ws['B3'].border = thin_border
-    ws['B4'].border = thin_border  # 给被合并的下半部分也设置边框
-    
+    _apply_merge_range_borders(ws, 'B3:B4')
+
     ws.merge_cells('C3:C4')
     ws['C3'] = ""
-    ws['C3'].border = thin_border
-    ws['C4'].border = thin_border  # 给被合并的下半部分也设置边框
+    _apply_merge_range_borders(ws, 'C3:C4')
     
-    ws.row_dimensions[3].height = 25
-    ws.row_dimensions[4].height = 25
+    ws.row_dimensions[3].height = 47.25
+    ws.row_dimensions[4].height = 69.75
     
-    # 冻结前4行，使表头在滚动时保持可见
-    ws.freeze_panes = 'A5'
+    # 冻结前4行表头 + 前3列(A-C：序号/姓名/行标签)，滚动从 D5 开始
+    ws.freeze_panes = "D5"
     
     # 写入日期列（1-31），从D列开始
     for day in range(1, days_in_month + 1):
@@ -208,12 +360,14 @@ def generate_attendance_report():
         cell = ws.cell(3, col_idx, day)
         cell.alignment = center_align
         cell.font = normal_font
-        cell.border = thin_border
-        
+        _apply_vertical_merge_borders(ws, col_idx, 3, 4)
+
         # 节假日/周末加阴影
         date = datetime(year, month, day).date()
         if is_holiday_or_weekend(date):
             cell.fill = gray_fill
+
+    _setup_stats_headers(ws, workdays, header_font, center_align)
     
     # 填充员工数据，从第5行开始
     current_row = 5
@@ -246,6 +400,8 @@ def generate_attendance_report():
                     '异常': anomaly['考勤异常情况']
                 })
         
+        emp_start_row = current_row
+
         # 设置行高
         ws.row_dimensions[current_row].height = 20
         ws.row_dimensions[current_row + 1].height = 20
@@ -255,18 +411,14 @@ def generate_attendance_report():
         cell_seq = ws.cell(current_row, 1, seq_num)
         cell_seq.alignment = center_align
         cell_seq.font = normal_font
-        cell_seq.border = thin_border
-        # 给被合并的下半部分也设置边框
-        ws.cell(current_row+1, 1).border = thin_border
-        
+        _apply_vertical_merge_borders(ws, 1, current_row, current_row + 1)
+
         # 姓名（跨两行）
         ws.merge_cells(start_row=current_row, start_column=2, end_row=current_row+1, end_column=2)
         cell_name = ws.cell(current_row, 2, name)
         cell_name.alignment = center_align
         cell_name.font = normal_font
-        cell_name.border = thin_border
-        # 给被合并的下半部分也设置边框
-        ws.cell(current_row+1, 2).border = thin_border
+        _apply_vertical_merge_borders(ws, 2, current_row, current_row + 1)
         
         # 第1行：正常出勤
         cell_label = ws.cell(current_row, 3, "正常出勤")
@@ -311,7 +463,7 @@ def generate_attendance_report():
                 cell.value = "缺"
                 # 添加批注
                 cell.comment = Comment(f"{date.strftime('%Y/%m/%d')}\n\n缺勤", "系统")
-        
+
         # 第2行：加班工时
         current_row += 1
         cell_label2 = ws.cell(current_row, 3, "加班工时")
@@ -343,7 +495,11 @@ def generate_attendance_report():
                         cell.value = _format_overtime_hours(result["hours"])
                     elif result["status"] == "异常":
                         cell.value = "异"
-        
+
+        _merge_stats_cells_for_employee(
+            ws, emp_start_row, current_row, normal_font, center_align
+        )
+
         current_row += 1
         seq_num += 1
     
