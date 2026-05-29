@@ -8,8 +8,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.holiday_checker import is_holiday_or_weekend, is_workday
-from utils.workday_overtime import TARGET_WORKDAY_OVERTIME_EMPLOYEES, calc_workday_overtime
-from utils.workday_overtime import TARGET_WORKDAY_OVERTIME_EMPLOYEES, calc_workday_overtime
+from utils.workday_overtime import (
+    TARGET_WORKDAY_OVERTIME_EMPLOYEES,
+    TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES,
+    calc_workday_overtime,
+)
 
 # 文件路径
 PUNCH_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/4月办公室打卡.xls"
@@ -333,9 +336,9 @@ def generate_attendance_report():
                         cell.value = _format_overtime_hours(hours)
             else:
                 # 工作日加班：仅统计指定名单员工
-                if name in TARGET_WORKDAY_OVERTIME_EMPLOYEES:
+                if name in TARGET_WORKDAY_OVERTIME_EMPLOYEES or name in TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES:
                     day_times = emp_punches_by_date.get(date, [])
-                    result = calc_workday_overtime(day_times)
+                    result = calc_workday_overtime(name, date, emp_id, day_times)
                     if result["status"] == "正常" and result["hours"] is not None and result["hours"] > 0:
                         cell.value = _format_overtime_hours(result["hours"])
                     elif result["status"] == "异常":
