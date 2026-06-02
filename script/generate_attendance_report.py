@@ -14,10 +14,14 @@ from utils.workday_overtime import (
     TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES,
     calc_workday_overtime,
 )
+from utils.agency_attendance import (
+    get_agency_employee_keys,
+    calc_agency_hours_for_shift_end_date,
+)
 
 # 文件路径
-PUNCH_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/4月办公室打卡.xls"
-ANOMALY_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/四月打卡异常.xlsx"
+PUNCH_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/5月办公室打卡.xls"
+ANOMALY_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/五月打卡异常.xlsx"
 OUTPUT_DIR = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files"
 
 
@@ -82,8 +86,33 @@ def _format_overtime_hours(hours):
     return text
 
 
+def _stats_hours_value(total):
+    """统计区工时：无加班为 0，有则与日历格相同格式。"""
+    if not total:
+        return 0
+    return _format_overtime_hours(total)
+
+
 STATS_COL_START = 35  # AI列
 STATS_COL_END = 57    # BE列
+
+# 正常出勤统计列
+COL_STATS_ACTUAL = 35       # AI 实际出勤
+COL_STATS_COMP_LEAVE = 36   # AJ 调休
+COL_STATS_ANNUAL_LEAVE = 37   # AK 年休假
+COL_STATS_ATTEND_SUM = 38     # AL 合计
+
+# 缺勤(天)统计列
+COL_STATS_PERSONAL_LEAVE = 39   # AM 事假
+COL_STATS_SICK_LEAVE = 40       # AN 病假
+COL_STATS_FAMILY_LEAVE = 41     # AO 婚丧产
+COL_STATS_WORK_INJURY = 42      # AP 工伤
+COL_STATS_ABSENT = 43           # AQ 旷工
+
+# 加班工时(H)统计列
+COL_STATS_OT_WEEKDAY = 44       # AR 平时
+COL_STATS_OT_REST = 45          # AS 休息日(周末+节假日)
+COL_STATS_OT_HOLIDAY = 46       # AT 节假日
 
 # 统计区列宽：竖排表头列宜窄且同组等宽，避免 AN/AU/BA 等过宽导致参差不齐
 STATS_COL_WIDTHS = {
@@ -221,8 +250,11 @@ def _setup_stats_headers(ws, workdays, header_font, center_align):
         ws.column_dimensions[col_letter].width = width
 
 
-def _merge_stats_cells_for_employee(ws, start_row, end_row, normal_font, center_align):
+def _merge_stats_cells_for_employee(
+    ws, start_row, end_row, normal_font, center_align, col_values=None
+):
     """右侧统计栏与序号/姓名一致：每位员工占两行，每列纵向合并。"""
+    col_values = col_values or {}
     for col in range(STATS_COL_START, STATS_COL_END + 1):
         ws.merge_cells(
             start_row=start_row,
@@ -231,8 +263,28 @@ def _merge_stats_cells_for_employee(ws, start_row, end_row, normal_font, center_
             end_column=col,
         )
         cell = ws.cell(start_row, col)
+        if col in col_values:
+            cell.value = col_values[col]
         _style_cell(cell, normal_font, center_align, _full_thin_border())
         _apply_vertical_merge_borders(ws, col, start_row, end_row)
+
+
+def _employee_stats_values(check_count, weekday_ot=0.0, rest_ot=0.0):
+    """员工统计区当前已实现的字段。"""
+    return {
+        COL_STATS_ACTUAL: check_count,
+        COL_STATS_COMP_LEAVE: 0,
+        COL_STATS_ANNUAL_LEAVE: 0,
+        COL_STATS_ATTEND_SUM: check_count,
+        COL_STATS_PERSONAL_LEAVE: 0,
+        COL_STATS_SICK_LEAVE: 0,
+        COL_STATS_FAMILY_LEAVE: 0,
+        COL_STATS_WORK_INJURY: 0,
+        COL_STATS_ABSENT: 0,
+        COL_STATS_OT_WEEKDAY: _stats_hours_value(weekday_ot),
+        COL_STATS_OT_REST: _stats_hours_value(rest_ot),
+        COL_STATS_OT_HOLIDAY: 0,
+    }
 
 
 def generate_attendance_report():
@@ -271,7 +323,8 @@ def generate_attendance_report():
     days_in_month = pd.Period(f'{year}-{month}').days_in_month
     
     employees = punch_df[['姓名', '编号']].drop_duplicates()
-    
+    agency_keys = get_agency_employee_keys(punch_df)
+
     # 计算工作日和休息日
     workdays = sum(1 for day in range(1, days_in_month + 1) 
                    if is_workday(datetime(year, month, day).date()))
@@ -427,6 +480,7 @@ def generate_attendance_report():
         cell_label.border = thin_border
         
         # 填充每日考勤，从D列开始
+        check_count = 0
         for day in range(1, days_in_month + 1):
             col_idx = 3 + day
             date = datetime(year, month, day).date()
@@ -458,6 +512,7 @@ def generate_attendance_report():
                 
             elif date in emp_punch_dates and not is_holiday_or_weekend(date):
                 cell.value = "√"
+                check_count += 1
             elif is_workday(date):
                 # 工作日无打卡=缺勤
                 cell.value = "缺"
@@ -472,6 +527,9 @@ def generate_attendance_report():
         cell_label2.border = thin_border
         
         # 加班工时行
+        weekday_ot_total = 0.0
+        rest_ot_total = 0.0
+        is_agency = (name, emp_id) in agency_keys
         for day in range(1, days_in_month + 1):
             col_idx = 3 + day
             date = datetime(year, month, day).date()
@@ -481,11 +539,26 @@ def generate_attendance_report():
             cell.alignment = center_align
             if is_holiday_or_weekend(date):
                 cell.fill = gray_fill
+
+            if is_agency:
+                # 中介：早班/夜班工时统一计入「平时」
+                hours = calc_agency_hours_for_shift_end_date(
+                    emp_punches_by_date, date
+                )
+                if hours is not None and hours > 0:
+                    cell.value = _format_overtime_hours(hours)
+                    weekday_ot_total += hours
+                continue
+
+            if is_holiday_or_weekend(date):
                 day_times = emp_punches_by_date.get(date, [])
                 if len(day_times) == 2:
-                    hours = calc_weekend_overtime_two_punches(day_times[0], day_times[1])
+                    hours = calc_weekend_overtime_two_punches(
+                        day_times[0], day_times[1]
+                    )
                     if hours is not None and hours > 0:
                         cell.value = _format_overtime_hours(hours)
+                        rest_ot_total += hours
             else:
                 # 工作日加班：仅统计指定名单员工
                 if name in TARGET_WORKDAY_OVERTIME_EMPLOYEES or name in TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES:
@@ -493,16 +566,23 @@ def generate_attendance_report():
                     result = calc_workday_overtime(name, date, emp_id, day_times)
                     if result["status"] == "正常" and result["hours"] is not None and result["hours"] > 0:
                         cell.value = _format_overtime_hours(result["hours"])
+                        weekday_ot_total += result["hours"]
                     elif result["status"] == "异常":
                         cell.value = "异"
 
+        stats_values = _employee_stats_values(check_count, weekday_ot_total, rest_ot_total)
         _merge_stats_cells_for_employee(
-            ws, emp_start_row, current_row, normal_font, center_align
+            ws, emp_start_row, current_row, normal_font, center_align, stats_values
         )
 
         current_row += 1
         seq_num += 1
-    
+
+    # 与模板一致：第4行表头启用自动筛选（升序/降序下拉箭头）
+    last_data_row = current_row - 1
+    if last_data_row >= 5:
+        ws.auto_filter.ref = f"A4:BE{last_data_row}"
+
     # 保存文件
     output_file = os.path.join(OUTPUT_DIR, f"{month}月考勤统计.xlsx")
     wb.save(output_file)

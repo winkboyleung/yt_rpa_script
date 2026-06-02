@@ -7,10 +7,16 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.holiday_checker import is_holiday_or_weekend, get_overtime_missing_card_type, is_workday
 from utils.group2_checker import check_group2_attendance
+from utils.agency_attendance import (
+    get_agency_employee_keys,
+    build_punches_by_date,
+    check_agency_employee,
+    collect_agency_check_dates,
+)
 
 # 文件路径
-INPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/4月办公室打卡.xls"
-OUTPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/四月打卡异常.xlsx"
+INPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/5月办公室打卡.xls"
+OUTPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/五月打卡异常.xlsx"
 
 # 考勤规则
 WORK_START_TIME = time(8, 33, 59)
@@ -116,9 +122,10 @@ def check_late_early(name, date, emp_id, times, record_count):
             })
     return anomalies
 
-def check_absence(df):
+def check_absence(df, skip_employee_keys=None):
     """工作日零打卡记为缺勤"""
     anomalies = []
+    skip_employee_keys = skip_employee_keys or set()
     employees = df[['姓名', '编号']].drop_duplicates()
     start_date = df['日期'].min()
     end_date = df['日期'].max()
@@ -126,6 +133,8 @@ def check_absence(df):
 
     for _, row in employees.iterrows():
         name, emp_id = row['姓名'], row['编号']
+        if (name, emp_id) in skip_employee_keys:
+            continue
         for day in pd.date_range(start_date, end_date):
             date = day.date()
             if not is_workday(date):
@@ -173,7 +182,27 @@ def analyze_attendance():
     anomalies = []
     processed_employees = set()
     grouped = df.groupby(['姓名', '日期', '编号'])
-    
+    agency_keys = get_agency_employee_keys(df)
+    month_start = df['日期'].min()
+    month_end = df['日期'].max()
+
+    # 中介部门：早班6次卡 / 夜班跨日2次卡
+    print("\n处理中介部门员工...")
+    for name, emp_id in sorted(agency_keys):
+        emp_df = df[(df['姓名'] == name) & (df['编号'] == emp_id)]
+        punches_by_date = build_punches_by_date(emp_df)
+        anomalies.extend(
+            check_agency_employee(
+                name, emp_id, punches_by_date, month_start, month_end
+            )
+        )
+        for punch_date in collect_agency_check_dates(
+            punches_by_date, month_start, month_end
+        ):
+            processed_employees.add((name, punch_date, emp_id))
+    if agency_keys:
+        print(f"  中介员工 {len(agency_keys)} 人")
+
     # 第一步：处理数组1的员工（只检查缺卡）
     print("\n处理数组1员工（只检查缺卡）...")
     for (name, date, emp_id), group in grouped:
@@ -223,7 +252,7 @@ def analyze_attendance():
                 anomalies.extend(check_late_early(name, date, emp_id, times, record_count))
 
     print("检查工作日缺勤（零打卡）...")
-    anomalies.extend(check_absence(df))
+    anomalies.extend(check_absence(df, skip_employee_keys=agency_keys))
     
     if anomalies:
         result_df = pd.DataFrame(anomalies)
