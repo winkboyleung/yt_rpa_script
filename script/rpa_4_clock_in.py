@@ -13,6 +13,7 @@ from utils.agency_attendance import (
     check_agency_employee,
     collect_agency_check_dates,
 )
+from utils.punch_config import get_four_punch_employee_names
 
 # 文件路径
 INPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/5月办公室打卡.xls"
@@ -26,9 +27,6 @@ WORK_END_TIME = time(17, 30)
 EMPLOYEE_GROUP_1 = ['林达玲', '梁海雯']  # 只检查缺卡
 EMPLOYEE_GROUP_2 = []  # 小部分人（4次基本卡），程序运行时自动填充
 EMPLOYEE_GROUP_3 = []  # 待定
-
-# 需要按4次基本卡处理的部门
-FOUR_PUNCH_DEPARTMENTS = ['工程组', '乳化车间', '灌装车间', '工艺组（PIE）', '品保QC', '仓库']
 
 def check_missing_card(name, date, emp_id, times, record_count):
     """检查缺卡情况（适用于数组1，所有缺卡都检查）"""
@@ -174,7 +172,7 @@ def analyze_attendance():
     df['打卡时间'] = df['日期时间'].dt.time
     
     # 自动识别并填充数组2：工程组、乳化车间、灌装车间的员工
-    group2_employees = df[df['部门'].isin(FOUR_PUNCH_DEPARTMENTS)]['姓名'].unique().tolist()
+    group2_employees = sorted(get_four_punch_employee_names(df))
     EMPLOYEE_GROUP_2.clear()
     EMPLOYEE_GROUP_2.extend(group2_employees)
     print(f"\n自动识别数组2员工（4次基本卡）: {EMPLOYEE_GROUP_2}")

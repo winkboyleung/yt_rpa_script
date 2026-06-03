@@ -9,10 +9,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.holiday_checker import is_holiday_or_weekend, is_workday
+from utils import workday_overtime
 from utils.workday_overtime import (
     TARGET_WORKDAY_OVERTIME_EMPLOYEES,
-    TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES,
     calc_workday_overtime,
+    calc_four_punch_department_rest_overtime,
+    refresh_workday_six_punch_employees_from_df,
 )
 from utils.agency_attendance import (
     get_agency_employee_keys,
@@ -303,6 +305,10 @@ def generate_attendance_report():
     punch_df['日期时间'] = pd.to_datetime(punch_df['日期时间'])
     punch_df['日期'] = punch_df['日期时间'].dt.date
     punch_df['打卡时间'] = punch_df['日期时间'].dt.time
+
+    six_punch_names = refresh_workday_six_punch_employees_from_df(punch_df)
+    print(f"\n六次卡工作日加班名单（来自四次基本卡部门，共 {len(six_punch_names)} 人）:")
+    print(sorted(six_punch_names))
     
     # 读取异常记录（如果文件不存在或读取失败，创建空DataFrame）
     anomaly_df = pd.DataFrame()
@@ -552,7 +558,18 @@ def generate_attendance_report():
 
             if is_holiday_or_weekend(date):
                 day_times = emp_punches_by_date.get(date, [])
-                if len(day_times) == 2:
+                if name in workday_overtime.TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES:
+                    result = calc_four_punch_department_rest_overtime(date, day_times)
+                    if (
+                        result["status"] == "正常"
+                        and result["hours"] is not None
+                        and result["hours"] > 0
+                    ):
+                        cell.value = _format_overtime_hours(result["hours"])
+                        rest_ot_total += result["hours"]
+                    elif result["status"] == "异常":
+                        cell.value = "异"
+                elif len(day_times) == 2:
                     hours = calc_weekend_overtime_two_punches(
                         day_times[0], day_times[1]
                     )
@@ -561,7 +578,10 @@ def generate_attendance_report():
                         rest_ot_total += hours
             else:
                 # 工作日加班：仅统计指定名单员工
-                if name in TARGET_WORKDAY_OVERTIME_EMPLOYEES or name in TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES:
+                if (
+                    name in TARGET_WORKDAY_OVERTIME_EMPLOYEES
+                    or name in workday_overtime.TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES
+                ):
                     day_times = emp_punches_by_date.get(date, [])
                     result = calc_workday_overtime(name, date, emp_id, day_times)
                     if result["status"] == "正常" and result["hours"] is not None and result["hours"] > 0:
