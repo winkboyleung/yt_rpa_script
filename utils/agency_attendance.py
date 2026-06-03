@@ -94,11 +94,18 @@ def _round_clock_out_backward_minutes(t):
 
 
 def _round_half_hour_up_minutes(t):
-    """上班卡：向上取整到下一半点（21:52→22:00）。"""
+    """
+    上班卡取整：
+    - 若距离上一半点 <=3 分钟，贴上一半点（22:03→22:00）
+    - 否则向上取整到下一半点（22:04→22:30）
+    """
     mins = t.hour * 60 + t.minute
+    lower = (mins // 30) * 30
+    if mins - lower <= ROUND_NEAR_HALF_HOUR_MINUTES:
+        return lower
     if mins % 30 == 0:
         return mins
-    return (mins // 30 + 1) * 30
+    return lower + 30
 
 
 def _round_half_hour_out_minutes(t):
@@ -136,7 +143,7 @@ def calc_agency_four_card_hours(punch_times):
         return None
     first = punch_times[0]
     last = punch_times[-1]
-    start_mins = max(DAY_SHIFT_BASE_MINUTES, _round_half_hour_up_minutes(first))
+    start_mins = _round_half_hour_up_minutes(first)
     end_mins = _round_clock_out_backward_minutes(last)
     hours = (end_mins - start_mins) / 60.0 - DAY_SHIFT_NO_OT_BREAK_HOURS
     if hours <= 0:
@@ -153,8 +160,9 @@ def calc_agency_day_shift_hours(punch_date, punch_times):
     if ot_out is None:
         return None
     ot_time = ot_out.time() if isinstance(ot_out, datetime) else ot_out
+    start_mins = _round_half_hour_up_minutes(punch_times[0])
     end_mins = _round_clock_out_backward_minutes(ot_time)
-    hours = (end_mins - DAY_SHIFT_BASE_MINUTES) / 60.0 - DAY_SHIFT_BREAK_HOURS
+    hours = (end_mins - start_mins) / 60.0 - DAY_SHIFT_BREAK_HOURS
     if hours <= 0:
         return None
     return round(hours, 2)

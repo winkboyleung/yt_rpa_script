@@ -28,7 +28,7 @@ EMPLOYEE_GROUP_2 = []  # 小部分人（4次基本卡），程序运行时自动
 EMPLOYEE_GROUP_3 = []  # 待定
 
 # 需要按4次基本卡处理的部门
-FOUR_PUNCH_DEPARTMENTS = ['工程组', '乳化车间', '灌装车间']
+FOUR_PUNCH_DEPARTMENTS = ['工程组', '乳化车间', '灌装车间', '工艺组（PIE）', '品保QC', '仓库']
 
 def check_missing_card(name, date, emp_id, times, record_count):
     """检查缺卡情况（适用于数组1，所有缺卡都检查）"""
