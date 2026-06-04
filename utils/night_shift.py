@@ -169,6 +169,27 @@ def collect_missing_night_start_dates(punches_by_date, month_start, month_end):
     return result
 
 
+def should_count_as_attendance_day(punches_by_date, punch_date):
+    """
+    FOUR_PUNCH / 中介：是否计「正常出勤√」。
+    当日仅有已被前一日夜班配对的次晨下班卡 → False。
+    """
+    day_times = punches_by_date.get(punch_date, [])
+    if not day_times:
+        return False
+
+    for t in day_times:
+        if is_night_evening_in(t):
+            return True
+        if not is_night_morning_out(t):
+            return True
+        if not is_morning_out_paired_from_previous_day(
+            punches_by_date, punch_date, t
+        ):
+            return True
+    return False
+
+
 def check_four_punch_night_anomaly(punch_date, punches_by_date):
     """四次基本卡部门：有晚无晨 → 异；有晨无晚（前一日缺卡）→ 缺卡。"""
     day_times = punches_by_date.get(punch_date, [])

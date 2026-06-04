@@ -20,7 +20,10 @@ from utils.agency_attendance import (
     get_agency_employee_keys,
     calc_agency_hours_for_shift_end_date,
 )
-from utils.night_shift import collect_missing_night_start_dates
+from utils.night_shift import (
+    collect_missing_night_start_dates,
+    should_count_as_attendance_day,
+)
 
 # 文件路径
 PUNCH_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/5月办公室打卡.xls"
@@ -479,6 +482,8 @@ def generate_attendance_report():
                         "异常": "缺卡",
                     })
         
+        is_agency = (name, emp_id) in agency_keys
+        is_four_punch = name in workday_overtime.TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES
         emp_start_row = current_row
 
         # 设置行高
@@ -537,8 +542,14 @@ def generate_attendance_report():
                 cell.comment = Comment('\n\n'.join(comment_lines), "系统")
                 
             elif date in emp_punch_dates and not is_holiday_or_weekend(date):
-                cell.value = "√"
-                check_count += 1
+                mark_check = True
+                if is_agency or is_four_punch:
+                    mark_check = should_count_as_attendance_day(
+                        emp_punches_by_date, date
+                    )
+                if mark_check:
+                    cell.value = "√"
+                    check_count += 1
             elif is_workday(date):
                 # 工作日无打卡=缺勤
                 cell.value = "缺"
@@ -555,7 +566,6 @@ def generate_attendance_report():
         # 加班工时行
         weekday_ot_total = 0.0
         rest_ot_total = 0.0
-        is_agency = (name, emp_id) in agency_keys
         for day in range(1, days_in_month + 1):
             col_idx = 3 + day
             date = datetime(year, month, day).date()
