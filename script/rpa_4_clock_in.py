@@ -6,7 +6,7 @@ import sys
 # 添加项目根目录到系统路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.holiday_checker import is_holiday_or_weekend, get_overtime_missing_card_type, is_workday
-from utils.group2_checker import check_group2_attendance
+from utils.workday_overtime import check_four_punch_employee
 from utils.agency_attendance import (
     get_agency_employee_keys,
     build_punches_by_date,
@@ -212,16 +212,24 @@ def analyze_attendance():
             anomalies.extend(check_missing_card(name, date, emp_id, times, record_count))
             processed_employees.add((name, date, emp_id))
     
-    # 第二步：处理数组2的员工（小部分人，4次基本卡）
+    # 第二步：处理数组2的员工（四次基本卡 + 跨日夜班）
     print("处理数组2员工（4次基本卡）...")
-    for (name, date, emp_id), group in grouped:
-        if name in EMPLOYEE_GROUP_2 and (name, date, emp_id) not in processed_employees:
-            records = group.sort_values('日期时间')
-            times = records['打卡时间'].tolist()
-            
-            # 使用专用函数检查数组2员工的考勤
-            anomalies.extend(check_group2_attendance(name, date, emp_id, times))
-            processed_employees.add((name, date, emp_id))
+    for name in EMPLOYEE_GROUP_2:
+        emp_rows = df[df["姓名"] == name]
+        if emp_rows.empty:
+            continue
+        emp_id = emp_rows.iloc[0]["编号"]
+        emp_df = df[(df["姓名"] == name) & (df["编号"] == emp_id)]
+        punches_by_date = build_punches_by_date(emp_df)
+        anomalies.extend(
+            check_four_punch_employee(
+                name, emp_id, punches_by_date, month_start, month_end
+            )
+        )
+        for punch_date in collect_agency_check_dates(
+            punches_by_date, month_start, month_end
+        ):
+            processed_employees.add((name, punch_date, emp_id))
     
     # 第三步：处理数组3的员工（待定）
     print("处理数组3员工（待定）...")

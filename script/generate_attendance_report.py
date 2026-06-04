@@ -20,6 +20,7 @@ from utils.agency_attendance import (
     get_agency_employee_keys,
     calc_agency_hours_for_shift_end_date,
 )
+from utils.night_shift import collect_missing_night_start_dates
 
 # 文件路径
 PUNCH_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/5月办公室打卡.xls"
@@ -442,7 +443,10 @@ def generate_attendance_report():
         emp_punches_by_date = {}
         for date, group in emp_records.groupby('日期'):
             emp_punches_by_date[date] = sorted(group['打卡时间'].tolist())
-        
+
+        month_start = datetime(year, month, 1).date()
+        month_end = datetime(year, month, days_in_month).date()
+
         # 获取该员工的异常记录（保留完整信息用于批注）
         emp_anomalies = {}
         emp_anomaly_details = {}  # 保存详细信息
@@ -458,6 +462,22 @@ def generate_attendance_report():
                     '时间': anomaly.get('打卡时间', ''),
                     '异常': anomaly['考勤异常情况']
                 })
+
+        missing_night_start = {}
+        if name in workday_overtime.TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES:
+            missing_night_start = collect_missing_night_start_dates(
+                emp_punches_by_date, month_start, month_end
+            )
+            for missing_date, info in missing_night_start.items():
+                if missing_date not in emp_anomalies:
+                    emp_anomalies[missing_date] = []
+                    emp_anomaly_details[missing_date] = []
+                if "缺卡" not in emp_anomalies[missing_date]:
+                    emp_anomalies[missing_date].append("缺卡")
+                    emp_anomaly_details[missing_date].append({
+                        "时间": str(info["ref_time"]),
+                        "异常": "缺卡",
+                    })
         
         emp_start_row = current_row
 
@@ -559,7 +579,9 @@ def generate_attendance_report():
             if is_holiday_or_weekend(date):
                 day_times = emp_punches_by_date.get(date, [])
                 if name in workday_overtime.TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES:
-                    result = calc_four_punch_department_rest_overtime(date, day_times)
+                    result = calc_four_punch_department_rest_overtime(
+                        date, day_times, emp_punches_by_date
+                    )
                     if (
                         result["status"] == "正常"
                         and result["hours"] is not None
@@ -569,6 +591,13 @@ def generate_attendance_report():
                         rest_ot_total += result["hours"]
                     elif result["status"] == "异常":
                         cell.value = "异"
+                    elif date in missing_night_start:
+                        cell.value = "异"
+                        info = missing_night_start[date]
+                        cell.comment = Comment(
+                            f"{date.strftime('%Y/%m/%d')}\n{info['ref_time']}\n缺卡",
+                            "系统",
+                        )
                 elif len(day_times) == 2:
                     hours = calc_weekend_overtime_two_punches(
                         day_times[0], day_times[1]
@@ -583,12 +612,21 @@ def generate_attendance_report():
                     or name in workday_overtime.TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES
                 ):
                     day_times = emp_punches_by_date.get(date, [])
-                    result = calc_workday_overtime(name, date, emp_id, day_times)
+                    result = calc_workday_overtime(
+                        name, date, emp_id, day_times, emp_punches_by_date
+                    )
                     if result["status"] == "正常" and result["hours"] is not None and result["hours"] > 0:
                         cell.value = _format_overtime_hours(result["hours"])
                         weekday_ot_total += result["hours"]
                     elif result["status"] == "异常":
                         cell.value = "异"
+                    elif date in missing_night_start:
+                        cell.value = "异"
+                        info = missing_night_start[date]
+                        cell.comment = Comment(
+                            f"{date.strftime('%Y/%m/%d')}\n{info['ref_time']}\n缺卡",
+                            "系统",
+                        )
 
         stats_values = _employee_stats_values(check_count, weekday_ot_total, rest_ot_total)
         _merge_stats_cells_for_employee(

@@ -1,7 +1,15 @@
 """
 工作日加班工时规则（当前仅处理指定名单员工）。
 """
-from utils.group2_checker import identify_group2_cards
+from datetime import timedelta
+
+from utils.group2_checker import check_group2_attendance, identify_group2_cards
+from utils.night_shift import (
+    is_night_morning_out,
+    try_four_punch_night_overtime,
+    check_four_punch_night_anomaly,
+)
+from utils.agency_attendance import collect_agency_check_dates
 
 TARGET_WORKDAY_OVERTIME_EMPLOYEES = {
     "莫淑兰",
@@ -102,16 +110,30 @@ def _calc_rest_day_hours(start_mins, end_mins, break_hours):
     return round(hours, 2)
 
 
-def calc_four_punch_department_rest_overtime(date, day_times):
+def calc_four_punch_department_rest_overtime(date, day_times, punches_by_date=None):
     """
     四次基本卡部门员工在周末/节假日的加班：
+    - 跨日 2 次夜班：整段工时进休息日
     - 4 次卡且基本卡齐全：末卡(向下取整) - 首卡(8:30下限+取整) - 1h
     - 6 次卡且六卡齐全：加班下班卡(向下取整) - 首卡 - 1.5h
-    - 2 次卡：末卡 - 首卡，不扣休息（回来多久算多久）
+    - 2 次卡同日：末卡 - 首卡，不扣休息
     """
     count = len(day_times)
     if count == 0:
         return {"status": "正常", "hours": 0, "reason": "无打卡"}
+
+    if punches_by_date is not None:
+        night = try_four_punch_night_overtime(punches_by_date, date, is_workday=False)
+        if night is not None:
+            if night["status"] == "正常":
+                return {
+                    "status": "正常",
+                    "hours": night["cell_hours"] or 0,
+                    "reason": "",
+                }
+            return {"status": "异常", "hours": None, "reason": night.get("reason", "跨日夜班异常")}
+        if count == 1 and is_night_morning_out(day_times[0]):
+            return {"status": "正常", "hours": 0, "reason": "夜班次晨下班，工时已归上班日"}
 
     sorted_times = sorted(day_times)
     start_mins = _round_rest_day_start_minutes(sorted_times[0])
@@ -155,7 +177,7 @@ def calc_four_punch_department_rest_overtime(date, day_times):
     return {"status": "异常", "hours": None, "reason": f"打卡次数为{count}次，无法计算假期加班"}
 
 
-def calc_workday_overtime(name, date, emp_id, day_times):
+def calc_workday_overtime(name, date, emp_id, day_times, punches_by_date=None):
     """
     工作日加班计算（当前规则）：
     - 六次卡名单员工（四次基本卡部门）：
@@ -176,23 +198,24 @@ def calc_workday_overtime(name, date, emp_id, day_times):
     count = len(day_times)
 
     if name in TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES:
-        if count < 2:
-            return {"status": "异常", "hours": None, "reason": f"打卡次数为{count}次，少于2次"}
+        if count == 0:
+            return {"status": "正常", "hours": 0, "reason": "无打卡"}
 
         sorted_times = sorted(day_times)
-        if count == 2:
-            clock_out = sorted_times[1]
-            if _time_to_minutes(clock_out) > 18 * 60:
-                end_mins = _round_overtime_end_backward(clock_out)
-                start_mins = 17 * 60 + 30 if end_mins < 19 * 60 + 30 else 18 * 60
-                if end_mins <= start_mins:
-                    return {"status": "正常", "hours": 0, "reason": "末卡向下取整后不晚于基准下班时间"}
-                return {"status": "正常", "hours": (end_mins - start_mins) / 60.0, "reason": ""}
-            return {"status": "正常", "hours": 0, "reason": "两次打卡且末卡不晚于18:00，无加班"}
 
-        identified = identify_group2_cards(date, sorted_times)
+        if count == 6:
+            identified = identify_group2_cards(date, sorted_times)
+            if not _has_complete_six_cards(identified):
+                return {"status": "异常", "hours": None, "reason": "六次打卡但卡位不齐"}
+            overtime_off = identified["加班下班卡"]
+            end_mins = _round_overtime_end_backward(overtime_off.time())
+            start_mins = 18 * 60
+            if end_mins <= start_mins:
+                return {"status": "正常", "hours": 0, "reason": "加班下班卡向下取整后不晚于18:00"}
+            return {"status": "正常", "hours": (end_mins - start_mins) / 60.0, "reason": ""}
 
         if count == 4:
+            identified = identify_group2_cards(date, sorted_times)
             if _has_complete_basic_four_cards(identified):
                 return {
                     "status": "正常",
@@ -205,15 +228,36 @@ def calc_workday_overtime(name, date, emp_id, day_times):
                 "reason": "四次打卡但基本卡不齐",
             }
 
-        overtime_off = identified.get("加班下班卡")
-        if overtime_off is None:
-            return {"status": "异常", "hours": None, "reason": "缺失加班下班卡"}
+        if count in (3, 5):
+            return {"status": "异常", "hours": None, "reason": f"打卡次数为{count}次，疑似缺卡"}
 
-        end_mins = _round_overtime_end_backward(overtime_off.time())
-        start_mins = 18 * 60
-        if end_mins <= start_mins:
-            return {"status": "正常", "hours": 0, "reason": "加班下班卡向下取整后不晚于18:00"}
-        return {"status": "正常", "hours": (end_mins - start_mins) / 60.0, "reason": ""}
+        if punches_by_date is not None:
+            night = try_four_punch_night_overtime(punches_by_date, date, is_workday=True)
+            if night is not None:
+                if night["status"] == "正常":
+                    return {
+                        "status": "正常",
+                        "hours": night["cell_hours"] or 0,
+                        "reason": "",
+                    }
+                return {"status": "异常", "hours": None, "reason": night.get("reason", "跨日夜班异常")}
+            if count == 1 and is_night_morning_out(sorted_times[0]):
+                return {"status": "正常", "hours": 0, "reason": "夜班次晨下班，工时已归上班日"}
+
+        if count == 1:
+            return {"status": "异常", "hours": None, "reason": "打卡次数为1次，疑似缺卡"}
+
+        if count == 2:
+            clock_out = sorted_times[1]
+            if _time_to_minutes(clock_out) > 18 * 60:
+                end_mins = _round_overtime_end_backward(clock_out)
+                start_mins = 17 * 60 + 30 if end_mins < 19 * 60 + 30 else 18 * 60
+                if end_mins <= start_mins:
+                    return {"status": "正常", "hours": 0, "reason": "末卡向下取整后不晚于基准下班时间"}
+                return {"status": "正常", "hours": (end_mins - start_mins) / 60.0, "reason": ""}
+            return {"status": "正常", "hours": 0, "reason": "两次打卡且末卡不晚于18:00，无加班"}
+
+        return {"status": "异常", "hours": None, "reason": f"打卡次数为{count}次，无法计算"}
 
     if count < 2:
         return {"status": "异常", "hours": None, "reason": f"打卡次数为{count}次，少于2次"}
@@ -252,3 +296,36 @@ def calc_workday_overtime(name, date, emp_id, day_times):
         return {"status": "正常", "hours": 0, "reason": "加班下班卡早于或等于加班上班卡"}
 
     return {"status": "正常", "hours": (end_mins - start_mins) / 60.0, "reason": ""}
+
+
+def check_four_punch_attendance_on_date(name, punch_date, emp_id, punches_by_date):
+    """四次基本卡部门：早班 group2 + 跨日夜班缺卡。"""
+    day_times = punches_by_date.get(punch_date, [])
+    n = len(day_times)
+
+    if n >= 3:
+        return check_group2_attendance(name, punch_date, emp_id, day_times)
+
+    night_anomaly = check_four_punch_night_anomaly(punch_date, punches_by_date)
+    if night_anomaly:
+        return [{
+            "姓名": name,
+            "日期": punch_date,
+            "编号": emp_id,
+            "打卡时间": str(night_anomaly["ref_time"]),
+            "考勤异常情况": night_anomaly["type"],
+        }]
+    return []
+
+
+def check_four_punch_employee(name, emp_id, punches_by_date, month_start, month_end):
+    anomalies = []
+    for punch_date in collect_agency_check_dates(
+        punches_by_date, month_start, month_end
+    ):
+        anomalies.extend(
+            check_four_punch_attendance_on_date(
+                name, punch_date, emp_id, punches_by_date
+            )
+        )
+    return anomalies
