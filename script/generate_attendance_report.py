@@ -24,6 +24,7 @@ from utils.night_shift import (
     collect_missing_night_start_dates,
     should_count_as_attendance_day,
 )
+from utils.punch_config import uses_two_punch_override, is_auto_workday_present
 
 # 文件路径
 PUNCH_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/5月办公室打卡.xls"
@@ -525,8 +526,10 @@ def generate_attendance_report():
             if is_holiday_or_weekend(date):
                 cell.fill = gray_fill
             
-            # 判断是否有异常
-            if date in emp_anomalies:
+            if is_auto_workday_present(name) and is_workday(date):
+                cell.value = "√"
+                check_count += 1
+            elif date in emp_anomalies:
                 # 如果异常类型包含"缺勤"，显示"缺"
                 if any('缺勤' in a for a in emp_anomalies[date]):
                     cell.value = "缺"
@@ -576,6 +579,9 @@ def generate_attendance_report():
             if is_holiday_or_weekend(date):
                 cell.fill = gray_fill
 
+            if is_auto_workday_present(name):
+                continue
+
             if is_agency:
                 # 中介：早班/夜班工时统一计入「平时」
                 hours = calc_agency_hours_for_shift_end_date(
@@ -620,6 +626,7 @@ def generate_attendance_report():
                 if (
                     name in TARGET_WORKDAY_OVERTIME_EMPLOYEES
                     or name in workday_overtime.TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES
+                    or uses_two_punch_override(name)
                 ):
                     day_times = emp_punches_by_date.get(date, [])
                     result = calc_workday_overtime(

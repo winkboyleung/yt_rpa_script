@@ -1,3 +1,4 @@
+import argparse
 import pandas as pd
 from datetime import datetime, time
 import os
@@ -13,11 +14,16 @@ from utils.agency_attendance import (
     check_agency_employee,
     collect_agency_check_dates,
 )
-from utils.punch_config import get_four_punch_employee_names
+from utils.punch_config import (
+    get_four_punch_employee_names,
+    TWO_PUNCH_OVERRIDE_NAMES,
+    AUTO_WORKDAY_PRESENT_NAMES,
+    is_auto_workday_present,
+)
 
 # 文件路径
-INPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/5月办公室打卡.xls"
-OUTPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/五月打卡异常.xlsx"
+INPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/6月打卡.xls"
+OUTPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/六月打卡异常.xlsx"
 
 # 考勤规则
 WORK_START_TIME = time(8, 33, 59)
@@ -131,6 +137,8 @@ def check_absence(df, skip_employee_keys=None):
 
     for _, row in employees.iterrows():
         name, emp_id = row['姓名'], row['编号']
+        if is_auto_workday_present(name):
+            continue
         if (name, emp_id) in skip_employee_keys:
             continue
         for day in pd.date_range(start_date, end_date):
@@ -147,13 +155,15 @@ def check_absence(df, skip_employee_keys=None):
                 })
     return anomalies
 
-def analyze_attendance():
-    """分析考勤异常情况"""
+def analyze_attendance(input_file=None, output_file=None):
+    """分析考勤异常情况（方案 B：整表打卡全月扫描，输出整月异常）"""
+    input_file = input_file or INPUT_FILE
+    output_file = output_file or OUTPUT_FILE
     try:
-        df = pd.read_excel(INPUT_FILE, engine='xlrd')
+        df = pd.read_excel(input_file, engine='xlrd')
     except:
         try:
-            df = pd.read_excel(INPUT_FILE, engine='openpyxl')
+            df = pd.read_excel(input_file, engine='openpyxl')
         except:
             print("无法读取xls文件，请将文件转换为xlsx格式")
             return
@@ -176,6 +186,10 @@ def analyze_attendance():
     EMPLOYEE_GROUP_2.clear()
     EMPLOYEE_GROUP_2.extend(group2_employees)
     print(f"\n自动识别数组2员工（4次基本卡）: {EMPLOYEE_GROUP_2}")
+    if TWO_PUNCH_OVERRIDE_NAMES:
+        print(f"按两次卡规则（非数组2）: {sorted(TWO_PUNCH_OVERRIDE_NAMES)}")
+    if AUTO_WORKDAY_PRESENT_NAMES:
+        print(f"工作日默认出勤√（不计算）: {sorted(AUTO_WORKDAY_PRESENT_NAMES)}")
     
     anomalies = []
     processed_employees = set()
@@ -204,6 +218,9 @@ def analyze_attendance():
     # 第一步：处理数组1的员工（只检查缺卡）
     print("\n处理数组1员工（只检查缺卡）...")
     for (name, date, emp_id), group in grouped:
+        if is_auto_workday_present(name):
+            processed_employees.add((name, date, emp_id))
+            continue
         if name in EMPLOYEE_GROUP_1:
             records = group.sort_values('日期时间')
             record_count = len(records)
@@ -215,6 +232,8 @@ def analyze_attendance():
     # 第二步：处理数组2的员工（四次基本卡 + 跨日夜班）
     print("处理数组2员工（4次基本卡）...")
     for name in EMPLOYEE_GROUP_2:
+        if is_auto_workday_present(name):
+            continue
         emp_rows = df[df["姓名"] == name]
         if emp_rows.empty:
             continue
@@ -241,6 +260,9 @@ def analyze_attendance():
     # 第四步：处理剩余员工（大部分人：2次基本卡 + 完整规则）
     print("处理剩余员工（2次基本卡 + 完整规则）...")
     for (name, date, emp_id), group in grouped:
+        if is_auto_workday_present(name):
+            processed_employees.add((name, date, emp_id))
+            continue
         if (name, date, emp_id) not in processed_employees:
             records = group.sort_values('日期时间')
             record_count = len(records)
@@ -262,13 +284,28 @@ def analyze_attendance():
     
     if anomalies:
         result_df = pd.DataFrame(anomalies)
-        result_df.to_excel(OUTPUT_FILE, index=False)
+        result_df.to_excel(output_file, index=False)
         print(f"\n共发现 {len(anomalies)} 条异常记录")
-        print(f"已保存到: {OUTPUT_FILE}")
+        print(f"已保存到: {output_file}")
         print("\n异常记录预览:")
         print(result_df.head(10))
     else:
         print("\n未发现考勤异常")
 
 if __name__ == "__main__":
-    analyze_attendance()
+    files_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "files"
+    )
+    parser = argparse.ArgumentParser(description="考勤异常检测（整月打卡全量扫描）")
+    parser.add_argument(
+        "--input",
+        default=os.path.join(files_dir, "6月打卡.xls"),
+        help="打卡记录文件",
+    )
+    parser.add_argument(
+        "--output",
+        default=os.path.join(files_dir, "6月打卡异常.xlsx"),
+        help="异常输出文件",
+    )
+    args = parser.parse_args()
+    analyze_attendance(args.input, args.output)
