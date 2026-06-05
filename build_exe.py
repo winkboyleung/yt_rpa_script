@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 ENTRY = "attendance_app.py"
-NAME = "attendance_app"
+NAME = "亚拓考勤统计模块"
 SPEC_FILE = ROOT / f"{NAME}.spec"
 
 

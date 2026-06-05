@@ -98,8 +98,8 @@ class RunnerWorker(QObject):
             raise FileNotFoundError(f"打卡文件不存在：{p.punch_path}")
         if not os.path.exists(p.template_path):
             raise FileNotFoundError(f"模板文件不存在：{p.template_path}")
-        if p.lookback_days not in (1, 2, 3, 4):
-            raise ValueError("回溯天数仅支持 1/2/3/4")
+        if not 1 <= p.lookback_days <= 7:
+            raise ValueError("回溯天数仅支持 1~7")
 
         out_dir = os.path.dirname(os.path.abspath(p.template_path))
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -190,10 +190,17 @@ class MainWindow(QMainWindow):
         self.date_edit.setDate(datetime(td.year, td.month, td.day))
 
         self.lookback_combo = QComboBox()
-        self.lookback_combo.addItem("昨天（1天）", 1)
-        self.lookback_combo.addItem("前两天（2天）", 2)
-        self.lookback_combo.addItem("前三天（3天）", 3)
-        self.lookback_combo.addItem("前四天（4天）", 4)
+        _lookback_labels = {
+            1: "昨天（1天）",
+            2: "前两天（2天）",
+            3: "前三天（3天）",
+            4: "前四天（4天）",
+            5: "前五天（5天）",
+            6: "前六天（6天）",
+            7: "前七天（7天）",
+        }
+        for days in range(1, 8):
+            self.lookback_combo.addItem(_lookback_labels[days], days)
         self.lookback_combo.setCurrentIndex(0)
 
         gl.addWidget(QLabel("打卡文件"), 0, 0)
