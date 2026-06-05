@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 import os
 import sys
 import traceback
@@ -36,6 +37,17 @@ from script.rpa_4_clock_in import analyze_attendance  # noqa: E402
 from script.fill_attendance_template import fill_attendance_template  # noqa: E402
 
 FILE_OPEN_MESSAGE = "文件正在打开，操作前请先关闭。"
+ANOMALY_FILE_PATTERN = "打卡异常_*.xlsx"
+
+
+def _cleanup_anomaly_files(out_dir: str, log) -> None:
+    """操作成功后删除临时异常表（含历史遗留的同类文件）。"""
+    for path in glob.glob(os.path.join(out_dir, ANOMALY_FILE_PATTERN)):
+        try:
+            os.remove(path)
+            log(f"- 已删除临时文件：{path}")
+        except OSError as exc:
+            log(f"- 删除临时文件失败：{path}（{exc}）")
 
 
 def _permission_error_detail(exc: PermissionError) -> str:
@@ -114,6 +126,10 @@ class RunnerWorker(QObject):
             lookback_days=p.lookback_days,
             output_path=p.template_path,  # 覆盖原模板
         )
+
+        self.log.emit("")
+        self.log.emit("清理临时异常表…")
+        _cleanup_anomaly_files(out_dir, self.log.emit)
 
         self.finished.emit("完成：已生成异常表并覆盖写入模板。")
 
