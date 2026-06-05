@@ -13,6 +13,7 @@ FOUR_PUNCH_DEPARTMENTS = [
 TWO_PUNCH_OVERRIDE_NAMES = frozenset({
     "黄兴红",
     "潘玉玲",
+    "吴锦乐"
 })
 
 # 工作日默认出勤√，不参与打卡异常与工时计算
