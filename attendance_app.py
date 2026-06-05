@@ -8,15 +8,30 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, QThread, Signal, Qt
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QEvent,
+    QObject,
+    QParallelAnimationGroup,
+    QPoint,
+    QPropertyAnimation,
+    QRect,
+    QThread,
+    QTimer,
+    Signal,
+    Qt,
+)
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap, QPolygon
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractItemView,
     QComboBox,
     QDateEdit,
     QFileDialog,
     QGridLayout,
     QGroupBox,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -92,6 +107,74 @@ def _dropdown_arrow_image_url(filename: str, upward: bool = False) -> str:
         painter.end()
         pm.save(str(arrow_path))
     return arrow_path.as_posix()
+
+
+_POPUP_ANIM_MS = 180
+
+
+def _run_popup_open_animation(popup: QWidget, slide_px: int = 8) -> None:
+    """下拉/日历弹出：淡入 + 轻微下滑，结束后移除特效避免后续卡顿。"""
+    if popup is None or not popup.isVisible():
+        return
+
+    end_rect = popup.geometry()
+    start_rect = QRect(
+        end_rect.x(),
+        end_rect.y() - slide_px,
+        end_rect.width(),
+        end_rect.height(),
+    )
+    popup.setGeometry(start_rect)
+
+    effect = QGraphicsOpacityEffect(popup)
+    effect.setOpacity(0.0)
+    popup.setGraphicsEffect(effect)
+
+    opacity_anim = QPropertyAnimation(effect, b"opacity", popup)
+    opacity_anim.setDuration(_POPUP_ANIM_MS)
+    opacity_anim.setStartValue(0.0)
+    opacity_anim.setEndValue(1.0)
+    opacity_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    geo_anim = QPropertyAnimation(popup, b"geometry", popup)
+    geo_anim.setDuration(_POPUP_ANIM_MS)
+    geo_anim.setStartValue(start_rect)
+    geo_anim.setEndValue(end_rect)
+    geo_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    group = QParallelAnimationGroup(popup)
+    group.addAnimation(opacity_anim)
+    group.addAnimation(geo_anim)
+    group.finished.connect(lambda: popup.setGraphicsEffect(None))
+    group.start(QAbstractAnimation.DeleteWhenStopped)
+
+
+class SmoothComboBox(QComboBox):
+    def showPopup(self):
+        super().showPopup()
+        view = self.view()
+        if view is None:
+            return
+        popup = view.window()
+        if popup is self.window():
+            return
+        _run_popup_open_animation(popup)
+
+
+class SmoothDateEdit(QDateEdit):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setCalendarPopup(True)
+        cal = self.calendarWidget()
+        if cal is not None:
+            cal.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Show:
+            popup = obj.window()
+            if popup is not self.window():
+                QTimer.singleShot(0, lambda p=popup: _run_popup_open_animation(p))
+        return super().eventFilter(obj, event)
 
 
 @dataclass(frozen=True)
@@ -219,16 +302,16 @@ class MainWindow(QMainWindow):
         self.template_btn.setMinimumHeight(36)
         self.template_btn.clicked.connect(self._choose_template)
 
-        self.date_edit = QDateEdit()
+        self.date_edit = SmoothDateEdit()
         self.date_edit.setObjectName("targetDateEdit")
-        self.date_edit.setCalendarPopup(True)
         self.date_edit.setDisplayFormat("yyyy 年 MM 月 dd 日")
         _configure_form_field(self.date_edit)
         td = _default_target_date()
         self.date_edit.setDate(datetime(td.year, td.month, td.day))
 
-        self.lookback_combo = QComboBox()
+        self.lookback_combo = SmoothComboBox()
         self.lookback_combo.setObjectName("lookbackCombo")
+        self.lookback_combo.setMaxVisibleItems(7)
         _configure_form_field(self.lookback_combo)
         _lookback_labels = {
             1: "昨天（1天）",
@@ -246,6 +329,8 @@ class MainWindow(QMainWindow):
         lookback_view = QListView()
         lookback_view.setObjectName("lookbackList")
         lookback_view.setSpacing(2)
+        lookback_view.setUniformItemSizes(True)
+        lookback_view.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.lookback_combo.setView(lookback_view)
 
         gl.addWidget(QLabel("打卡文件"), 0, 0)
@@ -589,6 +674,8 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    _dropdown_arrow_image_url("dropdown_arrow_down.png")
+    _dropdown_arrow_image_url("dropdown_arrow_up.png", upward=True)
     w = MainWindow()
     w.show()
     sys.exit(app.exec())
