@@ -6,9 +6,10 @@ import sys
 import traceback
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Signal, Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QObject, QPoint, QThread, Signal, Qt
+from PySide6.QtGui import QColor, QFont, QPainter, QPixmap, QPolygon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -19,11 +20,11 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListView,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSizePolicy,
-    QSpacerItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -63,6 +64,34 @@ def _qdate_to_date(qd) -> date:
 
 def _default_target_date() -> date:
     return datetime.now().date() - timedelta(days=1)
+
+
+def _configure_form_field(widget) -> None:
+    """统一表单输入框尺寸策略，保证各行宽度一致。"""
+    widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    widget.setMinimumHeight(36)
+    widget.setFont(QFont("Microsoft YaHei", 10))
+
+
+def _dropdown_arrow_image_url(filename: str, upward: bool = False) -> str:
+    """生成下拉箭头图片，供 QSS 使用（Windows 上比纯 CSS 三角形更稳定）。"""
+    cache_dir = Path(PROJECT_ROOT) / ".ui_cache"
+    cache_dir.mkdir(exist_ok=True)
+    arrow_path = cache_dir / filename
+    if not arrow_path.exists():
+        pm = QPixmap(12, 8)
+        pm.fill(Qt.transparent)
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QColor("#1677FF"))
+        painter.setPen(Qt.NoPen)
+        if upward:
+            painter.drawPolygon(QPolygon([QPoint(0, 8), QPoint(12, 8), QPoint(6, 0)]))
+        else:
+            painter.drawPolygon(QPolygon([QPoint(0, 0), QPoint(12, 0), QPoint(6, 8)]))
+        painter.end()
+        pm.save(str(arrow_path))
+    return arrow_path.as_posix()
 
 
 @dataclass(frozen=True)
@@ -164,6 +193,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_log_group(), stretch=1)
 
         self._apply_ding_style()
+        self._style_premium_controls()
 
     def _build_form_group(self) -> QWidget:
         gb = QGroupBox("参数")
@@ -174,22 +204,32 @@ class MainWindow(QMainWindow):
         gl.setVerticalSpacing(10)
 
         self.punch_edit = QLineEdit()
+        self.punch_edit.setObjectName("formLineEdit")
         self.punch_edit.setPlaceholderText("请选择打卡文件（.xls/.xlsx）")
+        _configure_form_field(self.punch_edit)
         self.punch_btn = QPushButton("选择…")
+        self.punch_btn.setMinimumHeight(36)
         self.punch_btn.clicked.connect(self._choose_punch)
 
         self.template_edit = QLineEdit()
+        self.template_edit.setObjectName("formLineEdit")
         self.template_edit.setPlaceholderText("请选择模板文件（.xlsx）")
+        _configure_form_field(self.template_edit)
         self.template_btn = QPushButton("选择…")
+        self.template_btn.setMinimumHeight(36)
         self.template_btn.clicked.connect(self._choose_template)
 
         self.date_edit = QDateEdit()
+        self.date_edit.setObjectName("targetDateEdit")
         self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.date_edit.setDisplayFormat("yyyy 年 MM 月 dd 日")
+        _configure_form_field(self.date_edit)
         td = _default_target_date()
         self.date_edit.setDate(datetime(td.year, td.month, td.day))
 
         self.lookback_combo = QComboBox()
+        self.lookback_combo.setObjectName("lookbackCombo")
+        _configure_form_field(self.lookback_combo)
         _lookback_labels = {
             1: "昨天（1天）",
             2: "前两天（2天）",
@@ -203,6 +243,11 @@ class MainWindow(QMainWindow):
             self.lookback_combo.addItem(_lookback_labels[days], days)
         self.lookback_combo.setCurrentIndex(0)
 
+        lookback_view = QListView()
+        lookback_view.setObjectName("lookbackList")
+        lookback_view.setSpacing(2)
+        self.lookback_combo.setView(lookback_view)
+
         gl.addWidget(QLabel("打卡文件"), 0, 0)
         gl.addWidget(self.punch_edit, 0, 1)
         gl.addWidget(self.punch_btn, 0, 2)
@@ -211,13 +256,19 @@ class MainWindow(QMainWindow):
         gl.addWidget(self.template_edit, 1, 1)
         gl.addWidget(self.template_btn, 1, 2)
 
+        btn_size = self.punch_btn.sizeHint()
+        date_placeholder = QWidget()
+        date_placeholder.setFixedSize(btn_size)
+        lookback_placeholder = QWidget()
+        lookback_placeholder.setFixedSize(btn_size)
+
         gl.addWidget(QLabel("目标日期"), 2, 0)
         gl.addWidget(self.date_edit, 2, 1)
-        gl.addItem(QSpacerItem(1, 1, QSizePolicy.Expanding, QSizePolicy.Minimum), 2, 2)
+        gl.addWidget(date_placeholder, 2, 2)
 
         gl.addWidget(QLabel("处理范围"), 3, 0)
         gl.addWidget(self.lookback_combo, 3, 1)
-        gl.addItem(QSpacerItem(1, 1, QSizePolicy.Expanding, QSizePolicy.Minimum), 3, 2)
+        gl.addWidget(lookback_placeholder, 3, 2)
 
         return gb
 
@@ -269,14 +320,14 @@ class MainWindow(QMainWindow):
                 color: rgba(0,0,0,0.75);
             }
             QLabel { color: rgba(0,0,0,0.85); font-family: "Microsoft YaHei"; }
-            QLineEdit, QDateEdit, QComboBox, QTextEdit {
+            QLineEdit#formLineEdit, QTextEdit {
                 background: #FFFFFF;
                 border: 1px solid rgba(0,0,0,0.12);
                 border-radius: 8px;
                 padding: 8px 10px;
                 selection-background-color: #1677FF;
             }
-            QLineEdit:focus, QDateEdit:focus, QComboBox:focus, QTextEdit:focus {
+            QLineEdit#formLineEdit:focus, QTextEdit:focus {
                 border: 1px solid #1677FF;
             }
             QPushButton {
@@ -308,6 +359,141 @@ class MainWindow(QMainWindow):
             }
             QPushButton:hover { background: rgba(22,119,255,0.06); }
             QPushButton:pressed { background: rgba(22,119,255,0.12); }
+            """
+        )
+
+    def _style_premium_controls(self):
+        arrow_down = _dropdown_arrow_image_url("dropdown_arrow_down.png")
+        arrow_up = _dropdown_arrow_image_url("dropdown_arrow_up.png", upward=True)
+        arrow_styles = f"""
+            QDateEdit#targetDateEdit::down-arrow,
+            QComboBox#lookbackCombo::down-arrow {{
+                width: 12px;
+                height: 8px;
+                image: url({arrow_down});
+            }}
+            QComboBox#lookbackCombo::down-arrow:on {{
+                image: url({arrow_up});
+            }}
+        """
+        self.setStyleSheet(
+            self.styleSheet()
+            + """
+            QLineEdit#formLineEdit {
+                min-height: 36px;
+                padding: 8px 10px;
+                background: qlineargradient(
+                    x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #FFFFFF, stop:1 #F8FAFF
+                );
+                border: 1px solid rgba(22, 119, 255, 0.22);
+                border-radius: 10px;
+                color: rgba(0, 0, 0, 0.88);
+                font-family: "Microsoft YaHei";
+            }
+            QDateEdit#targetDateEdit, QComboBox#lookbackCombo {
+                min-height: 36px;
+                padding: 8px 40px 8px 10px;
+                background: qlineargradient(
+                    x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #FFFFFF, stop:1 #F8FAFF
+                );
+                border: 1px solid rgba(22, 119, 255, 0.22);
+                border-radius: 10px;
+                color: rgba(0, 0, 0, 0.88);
+                font-family: "Microsoft YaHei";
+            }
+            QLineEdit#formLineEdit:hover, QDateEdit#targetDateEdit:hover, QComboBox#lookbackCombo:hover {
+                border: 1px solid rgba(22, 119, 255, 0.45);
+                background: qlineargradient(
+                    x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #FFFFFF, stop:1 #F2F7FF
+                );
+            }
+            QLineEdit#formLineEdit:focus, QDateEdit#targetDateEdit:focus, QComboBox#lookbackCombo:focus {
+                border: 1px solid #1677FF;
+                background: #FFFFFF;
+            }
+            QLineEdit#formLineEdit:disabled, QDateEdit#targetDateEdit:disabled, QComboBox#lookbackCombo:disabled {
+                background: #F5F7FA;
+                color: rgba(0, 0, 0, 0.35);
+                border: 1px solid rgba(0, 0, 0, 0.08);
+            }
+            QDateEdit#targetDateEdit::drop-down,
+            QComboBox#lookbackCombo::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 36px;
+                border-left: 1px solid rgba(22, 119, 255, 0.14);
+                border-top-right-radius: 10px;
+                border-bottom-right-radius: 10px;
+                background: rgba(22, 119, 255, 0.06);
+            }
+            QDateEdit#targetDateEdit::drop-down:hover,
+            QComboBox#lookbackCombo::drop-down:hover {
+                background: rgba(22, 119, 255, 0.12);
+            }
+            """
+            + arrow_styles
+            + """
+            QComboBox#lookbackCombo QAbstractItemView#lookbackList {
+                background: #FFFFFF;
+                border: 1px solid rgba(22, 119, 255, 0.22);
+                border-radius: 10px;
+                padding: 6px;
+                outline: 0;
+                selection-background-color: transparent;
+            }
+            QComboBox#lookbackCombo QAbstractItemView#lookbackList::item {
+                min-height: 36px;
+                padding: 8px 12px;
+                border-radius: 8px;
+                color: rgba(0, 0, 0, 0.85);
+            }
+            QComboBox#lookbackCombo QAbstractItemView#lookbackList::item:hover {
+                background: rgba(22, 119, 255, 0.08);
+                color: #1677FF;
+            }
+            QComboBox#lookbackCombo QAbstractItemView#lookbackList::item:selected {
+                background: rgba(22, 119, 255, 0.14);
+                color: #1677FF;
+                font-weight: 600;
+            }
+            QCalendarWidget {
+                background: #FFFFFF;
+                border: 1px solid rgba(22, 119, 255, 0.22);
+                border-radius: 10px;
+            }
+            QCalendarWidget QWidget#qt_calendar_navigationbar {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #F8FAFF, stop:1 #EEF4FF
+                );
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                min-height: 36px;
+            }
+            QCalendarWidget QToolButton {
+                color: #1677FF;
+                background: transparent;
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-family: "Microsoft YaHei";
+                font-weight: 600;
+            }
+            QCalendarWidget QToolButton:hover {
+                background: rgba(22, 119, 255, 0.10);
+            }
+            QCalendarWidget QAbstractItemView:enabled {
+                color: rgba(0, 0, 0, 0.85);
+                background: #FFFFFF;
+                selection-background-color: #1677FF;
+                selection-color: #FFFFFF;
+                outline: 0;
+            }
+            QCalendarWidget QAbstractItemView:enabled:hover {
+                background: rgba(22, 119, 255, 0.08);
+            }
             """
         )
 
