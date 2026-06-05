@@ -35,6 +35,7 @@ MANIFEST
 *.xls
 *.xml
 *.iml
+*.exe
 
 # Installer logs
 pip-log.txt

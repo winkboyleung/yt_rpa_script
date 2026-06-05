@@ -1,0 +1,6 @@
+pandas
+openpyxl
+chinese-calendar
+xlrd
+PySide6
+pyinstaller

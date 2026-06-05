@@ -209,6 +209,15 @@ def compute_overtime_cell(
     return None, None
 
 
+def _agency_daily_comment(punch_date, emp_anomaly_details):
+    lines = []
+    for detail in emp_anomaly_details.get(punch_date, []):
+        lines.append(
+            f"{punch_date.strftime('%Y/%m/%d')}\n{detail['时间']}\n{detail['异常']}"
+        )
+    return "\n\n".join(lines) if lines else None
+
+
 def compute_agency_template_daily_cell(
     punch_date,
     emp_punches_by_date,
@@ -216,20 +225,25 @@ def compute_agency_template_daily_cell(
     emp_anomaly_details,
 ):
     """
-    中介模版每日一格：工时数字 / 0（未上班）/ 异（缺卡等）。
+    中介模版每日一格：工时数字；无工时时统一按 0 > 缺 > 异（不区分工作日/休息日/节假日）。
     """
-    if punch_date in emp_anomalies:
-        lines = []
-        for detail in emp_anomaly_details.get(punch_date, []):
-            lines.append(
-                f"{punch_date.strftime('%Y/%m/%d')}\n{detail['时间']}\n{detail['异常']}"
-            )
-        comment = "\n\n".join(lines) if lines else None
-        return "异", comment
-
     hours = calc_agency_hours_for_shift_end_date(
         emp_punches_by_date, punch_date
     )
     if hours is not None and hours > 0:
         return _format_overtime_hours(hours), None
-    return 0, None
+
+    day_anomalies = emp_anomalies.get(punch_date, [])
+    is_absence = any("缺勤" in a for a in day_anomalies)
+    has_other_anomaly = any("缺勤" not in a for a in day_anomalies)
+
+    if not is_absence and not has_other_anomaly:
+        return 0, None
+
+    comment = _agency_daily_comment(punch_date, emp_anomaly_details)
+    if is_absence:
+        if not comment:
+            comment = f"{punch_date.strftime('%Y/%m/%d')}\n\n缺勤"
+        return "缺", comment
+
+    return "异", comment

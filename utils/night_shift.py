@@ -135,6 +135,7 @@ def _is_empty_rest_day(punches_by_date, d):
 def find_missing_night_start_for_morning_out(punches_by_date, punch_date):
     """
     当日有次晨下班卡且未被前一日配对 → 前一日缺晚间上班卡。
+    前一日零打卡 → 不记跨日缺卡（由缺勤等逻辑处理，方案 D）。
     前一日若为「零打卡的休息日」则跳过（FOUR_PUNCH 专用）。
     返回 {"missing_date", "ref_time", "reason"} 或 None。
     """
@@ -153,6 +154,8 @@ def find_missing_night_start_for_morning_out(punches_by_date, punch_date):
             continue
         prev_evening = [t for t in prev_times if is_night_evening_in(t)]
         if not prev_evening:
+            if not prev_times:
+                continue
             if _is_empty_rest_day(punches_by_date, prev_date):
                 continue
             return {

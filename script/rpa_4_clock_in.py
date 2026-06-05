@@ -39,20 +39,21 @@ EMPLOYEE_GROUP_1 = ['林达玲', '梁海雯']  # 只检查缺卡
 EMPLOYEE_GROUP_2 = []  # 小部分人（4次基本卡），程序运行时自动填充
 EMPLOYEE_GROUP_3 = []  # 待定
 
+
 def check_missing_card(name, date, emp_id, times, record_count):
     """检查缺卡情况（适用于数组1，所有缺卡都检查）"""
     anomalies = []
     if record_count < 2:
         if record_count == 1:
             clock_time = times[0]
-            
+
             anomaly_type = get_overtime_missing_card_type(date)
             if anomaly_type is None:
                 if clock_time < time(12, 0):
                     anomaly_type = '无打下班卡'
                 else:
                     anomaly_type = '无打上班卡'
-            
+
             anomalies.append({
                 '姓名': name,
                 '日期': date,
@@ -62,18 +63,19 @@ def check_missing_card(name, date, emp_id, times, record_count):
             })
     return anomalies
 
+
 def check_missing_card_default(name, date, emp_id, times, record_count):
     """检查缺卡情况（适用于大部分人，2次基本卡）"""
     anomalies = []
-    
+
     # 打卡次数 = 2 或 4，正常
     if record_count == 2 or record_count == 4:
         return anomalies
-    
+
     # 打卡次数为单数（1 或 3），缺卡
     if record_count in [1, 3]:
         overtime_missing_card_type = get_overtime_missing_card_type(date)
-        
+
         if record_count == 1:
             clock_time = times[0]
             if overtime_missing_card_type:
@@ -83,7 +85,7 @@ def check_missing_card_default(name, date, emp_id, times, record_count):
                     anomaly_type = '无打下班卡'
                 else:
                     anomaly_type = '无打上班卡'
-            
+
             anomalies.append({
                 '姓名': name,
                 '日期': date,
@@ -94,7 +96,7 @@ def check_missing_card_default(name, date, emp_id, times, record_count):
         elif record_count == 3:
             first_time = times[0]
             anomaly_type = overtime_missing_card_type or '缺卡'
-            
+
             anomalies.append({
                 '姓名': name,
                 '日期': date,
@@ -102,8 +104,9 @@ def check_missing_card_default(name, date, emp_id, times, record_count):
                 '打卡时间': str(first_time),
                 '考勤异常情况': anomaly_type
             })
-    
+
     return anomalies
+
 
 def check_late_early(name, date, emp_id, times, record_count):
     """检查迟到早退情况"""
@@ -111,7 +114,7 @@ def check_late_early(name, date, emp_id, times, record_count):
     if record_count >= 2:
         first_time = times[0]
         last_time = times[-1]
-        
+
         if first_time > WORK_START_TIME:
             anomalies.append({
                 '姓名': name,
@@ -120,7 +123,7 @@ def check_late_early(name, date, emp_id, times, record_count):
                 '打卡时间': str(first_time),
                 '考勤异常情况': '上班迟到'
             })
-        
+
         if last_time < WORK_END_TIME:
             anomalies.append({
                 '姓名': name,
@@ -130,6 +133,7 @@ def check_late_early(name, date, emp_id, times, record_count):
                 '考勤异常情况': '下班早退'
             })
     return anomalies
+
 
 def check_absence(df, skip_employee_keys=None):
     """工作日零打卡记为缺勤"""
@@ -160,6 +164,7 @@ def check_absence(df, skip_employee_keys=None):
                 })
     return anomalies
 
+
 def analyze_attendance(input_file=None, output_file=None):
     """分析考勤异常情况（方案 B：整表打卡全月扫描，输出整月异常）"""
     input_file = input_file or INPUT_FILE
@@ -172,20 +177,20 @@ def analyze_attendance(input_file=None, output_file=None):
         except:
             print("无法读取xls文件，请将文件转换为xlsx格式")
             return
-    
+
     print("数据列名:", df.columns.tolist())
     print("\n前5行数据:")
     print(df.head())
-    
+
     # 打印节假日信息
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("节假日信息（节假日和周末不检查迟到早退）")
-    print("="*50)
-    
+    print("=" * 50)
+
     df['日期时间'] = pd.to_datetime(df['日期时间'])
     df['日期'] = df['日期时间'].dt.date
     df['打卡时间'] = df['日期时间'].dt.time
-    
+
     # 自动识别并填充数组2：工程组、乳化车间、灌装车间的员工
     group2_employees = sorted(get_four_punch_employee_names(df))
     EMPLOYEE_GROUP_2.clear()
@@ -195,7 +200,7 @@ def analyze_attendance(input_file=None, output_file=None):
         print(f"按两次卡规则（非数组2）: {sorted(TWO_PUNCH_OVERRIDE_NAMES)}")
     if AUTO_WORKDAY_PRESENT_NAMES:
         print(f"工作日默认出勤√（不计算）: {sorted(AUTO_WORKDAY_PRESENT_NAMES)}")
-    
+
     anomalies = []
     processed_employees = set()
     grouped = df.groupby(['姓名', '日期', '编号'])
@@ -214,7 +219,7 @@ def analyze_attendance(input_file=None, output_file=None):
             )
         )
         for punch_date in collect_agency_check_dates(
-            punches_by_date, month_start, month_end
+                punches_by_date, month_start, month_end
         ):
             processed_employees.add((name, punch_date, emp_id))
     if agency_keys:
@@ -230,10 +235,10 @@ def analyze_attendance(input_file=None, output_file=None):
             records = group.sort_values('日期时间')
             record_count = len(records)
             times = records['打卡时间'].tolist()
-            
+
             anomalies.extend(check_missing_card(name, date, emp_id, times, record_count))
             processed_employees.add((name, date, emp_id))
-    
+
     # 第二步：处理数组2的员工（四次基本卡 + 跨日夜班）
     print("处理数组2员工（4次基本卡）...")
     for name in EMPLOYEE_GROUP_2:
@@ -251,17 +256,17 @@ def analyze_attendance(input_file=None, output_file=None):
             )
         )
         for punch_date in collect_agency_check_dates(
-            punches_by_date, month_start, month_end
+                punches_by_date, month_start, month_end
         ):
             processed_employees.add((name, punch_date, emp_id))
-    
+
     # 第三步：处理数组3的员工（待定）
     print("处理数组3员工（待定）...")
     for (name, date, emp_id), group in grouped:
         if name in EMPLOYEE_GROUP_3 and (name, date, emp_id) not in processed_employees:
             # 待定规则，目前不处理
             processed_employees.add((name, date, emp_id))
-    
+
     # 第四步：处理剩余员工（大部分人：2次基本卡 + 完整规则）
     print("处理剩余员工（2次基本卡 + 完整规则）...")
     for (name, date, emp_id), group in grouped:
@@ -272,10 +277,10 @@ def analyze_attendance(input_file=None, output_file=None):
             records = group.sort_values('日期时间')
             record_count = len(records)
             times = records['打卡时间'].tolist()
-            
+
             # 检查缺卡（无论是否节假日都要检查）
             anomalies.extend(check_missing_card_default(name, date, emp_id, times, record_count))
-            
+
             # 判断是否为节假日或周末
             if is_holiday_or_weekend(date):
                 # 节假日或周末，不检查迟到早退
@@ -285,8 +290,8 @@ def analyze_attendance(input_file=None, output_file=None):
                 anomalies.extend(check_late_early(name, date, emp_id, times, record_count))
 
     print("检查工作日缺勤（零打卡）...")
-    anomalies.extend(check_absence(df, skip_employee_keys=agency_keys))
-    
+    anomalies.extend(check_absence(df))
+
     if anomalies:
         result_df = pd.DataFrame(anomalies)
         result_df.to_excel(output_file, index=False)
@@ -296,6 +301,7 @@ def analyze_attendance(input_file=None, output_file=None):
         print(result_df.head(10))
     else:
         print("\n未发现考勤异常")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="考勤异常检测（整月打卡全量扫描）")
