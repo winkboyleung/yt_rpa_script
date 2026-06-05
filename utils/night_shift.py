@@ -9,6 +9,7 @@ ROUND_NEAR_HALF_HOUR_MINUTES = 3
 DAY_SHIFT_MIN_COUNT = 4
 NIGHT_SHIFT_MAX_START_DAY_COUNT = 2
 FOUR_PUNCH_STANDARD_HOURS = 8.0
+DAY_SHIFT_START_MINUTES = 8 * 60 + 30
 
 
 def is_night_morning_out(t):
@@ -45,6 +46,14 @@ def round_half_hour_up_minutes(t):
     if mins % 30 == 0:
         return mins
     return lower + 30
+
+
+def round_day_shift_start_minutes(t):
+    """白班首卡：8:30 及之前一律按 8:30；之后按半点向上取整（夜班不用此函数）。"""
+    mins = t.hour * 60 + t.minute
+    if mins <= DAY_SHIFT_START_MINUTES:
+        return DAY_SHIFT_START_MINUTES
+    return round_half_hour_up_minutes(t)
 
 
 def round_half_hour_out_minutes(t):

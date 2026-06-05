@@ -11,7 +11,7 @@ from utils.night_shift import (
     is_night_morning_out,
     pair_night_shift_starting,
     round_half_hour_out_minutes,
-    round_half_hour_up_minutes,
+    round_day_shift_start_minutes,
 )
 
 AGENCY_DEPARTMENT = "中介"
@@ -77,7 +77,7 @@ def calc_agency_four_card_hours(punch_times):
         return None
     first = punch_times[0]
     last = punch_times[-1]
-    start_mins = round_half_hour_up_minutes(first)
+    start_mins = round_day_shift_start_minutes(first)
     end_mins = _round_clock_out_backward_minutes(last)
     hours = (end_mins - start_mins) / 60.0 - DAY_SHIFT_NO_OT_BREAK_HOURS
     if hours <= 0:
@@ -93,7 +93,7 @@ def calc_agency_day_shift_hours(punch_date, punch_times):
     if ot_out is None:
         return None
     ot_time = ot_out.time() if isinstance(ot_out, datetime) else ot_out
-    start_mins = round_half_hour_up_minutes(punch_times[0])
+    start_mins = round_day_shift_start_minutes(punch_times[0])
     end_mins = _round_clock_out_backward_minutes(ot_time)
     hours = (end_mins - start_mins) / 60.0 - DAY_SHIFT_BREAK_HOURS
     if hours <= 0:
