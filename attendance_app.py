@@ -26,6 +26,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPixmap, QPolygon
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
+    QCalendarWidget,
     QComboBox,
     QDateEdit,
     QFileDialog,
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QGraphicsOpacityEffect,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListView,
@@ -40,6 +42,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QTableView,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -161,18 +166,82 @@ class SmoothComboBox(QComboBox):
         _run_popup_open_animation(popup)
 
 
+class CalendarDayDelegate(QStyledItemDelegate):
+    """日历日期格：圆角选中/悬停，替代默认表格风格。"""
+
+    def paint(self, painter, option, index):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        text = index.data()
+        if not text:
+            painter.restore()
+            return
+
+        cell = option.rect.adjusted(4, 4, -4, -4)
+        enabled = bool(option.state & QStyle.State_Enabled)
+
+        if option.state & QStyle.State_Selected:
+            painter.setBrush(QColor("#1677FF"))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(cell, 8, 8)
+            painter.setPen(QColor("#FFFFFF"))
+        elif enabled and option.state & QStyle.State_MouseOver:
+            painter.setBrush(QColor(22, 119, 255, 30))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(cell, 8, 8)
+            painter.setPen(QColor("#1677FF"))
+        elif enabled:
+            painter.setPen(QColor(0, 0, 0, 220))
+        else:
+            painter.setPen(QColor(0, 0, 0, 90))
+
+        painter.setFont(option.font)
+        painter.drawText(option.rect, Qt.AlignCenter, str(text))
+        painter.restore()
+
+
+class ModernCalendarWidget(QCalendarWidget):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("modernCalendar")
+        self.setVerticalHeaderFormat(
+            QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader
+        )
+        self.setHorizontalHeaderFormat(
+            QCalendarWidget.HorizontalHeaderFormat.ShortDayNames
+        )
+        self.setGridVisible(False)
+        self.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
+        self.setMinimumSize(340, 300)
+        self.setNavigationBarVisible(True)
+
+        table = self.findChild(QTableView)
+        if table is not None:
+            table.setObjectName("modernCalendarTable")
+            table.setShowGrid(False)
+            table.setFocusPolicy(Qt.NoFocus)
+            table.setSelectionMode(QAbstractItemView.SingleSelection)
+            table.setItemDelegate(CalendarDayDelegate(table))
+            header = table.horizontalHeader()
+            header.setDefaultAlignment(Qt.AlignCenter)
+            header.setSectionResizeMode(QHeaderView.Stretch)
+            header.setFixedHeight(34)
+            header.setHighlightSections(False)
+
+
 class SmoothDateEdit(QDateEdit):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        cal = ModernCalendarWidget()
+        self.setCalendarWidget(cal)
         self.setCalendarPopup(True)
-        cal = self.calendarWidget()
-        if cal is not None:
-            cal.installEventFilter(self)
+        cal.installEventFilter(self)
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Show:
             popup = obj.window()
             if popup is not self.window():
+                popup.setObjectName("calendarPopup")
                 QTimer.singleShot(0, lambda p=popup: _run_popup_open_animation(p))
         return super().eventFilter(obj, event)
 
@@ -544,40 +613,71 @@ class MainWindow(QMainWindow):
                 color: #1677FF;
                 font-weight: 600;
             }
-            QCalendarWidget {
+            QWidget#calendarPopup {
                 background: #FFFFFF;
-                border: 1px solid rgba(22, 119, 255, 0.22);
-                border-radius: 10px;
+                border: 1px solid rgba(22, 119, 255, 0.18);
+                border-radius: 14px;
+                padding: 4px;
             }
-            QCalendarWidget QWidget#qt_calendar_navigationbar {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #F8FAFF, stop:1 #EEF4FF
-                );
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-                min-height: 36px;
+            QCalendarWidget#modernCalendar {
+                background: #FFFFFF;
+                border: none;
+                border-radius: 12px;
+                padding: 8px 10px 12px 10px;
             }
-            QCalendarWidget QToolButton {
-                color: #1677FF;
+            QCalendarWidget#modernCalendar QWidget#qt_calendar_navigationbar {
                 background: transparent;
-                border-radius: 6px;
-                padding: 4px 8px;
+                border: none;
+                min-height: 44px;
+                padding: 0 4px;
+            }
+            QCalendarWidget#modernCalendar QToolButton {
+                color: #1677FF;
+                background: rgba(22, 119, 255, 0.06);
+                border: 1px solid rgba(22, 119, 255, 0.12);
+                border-radius: 8px;
+                min-width: 32px;
+                min-height: 32px;
+                padding: 4px;
                 font-family: "Microsoft YaHei";
                 font-weight: 600;
             }
-            QCalendarWidget QToolButton:hover {
-                background: rgba(22, 119, 255, 0.10);
+            QCalendarWidget#modernCalendar QToolButton:hover {
+                background: rgba(22, 119, 255, 0.14);
+                border: 1px solid rgba(22, 119, 255, 0.28);
             }
-            QCalendarWidget QAbstractItemView:enabled {
-                color: rgba(0, 0, 0, 0.85);
+            QCalendarWidget#modernCalendar QToolButton:pressed {
+                background: rgba(22, 119, 255, 0.22);
+            }
+            QCalendarWidget#modernCalendar QSpinBox,
+            QCalendarWidget#modernCalendar QComboBox {
+                background: #F5F8FF;
+                border: 1px solid rgba(22, 119, 255, 0.16);
+                border-radius: 8px;
+                padding: 4px 8px;
+                color: rgba(0, 0, 0, 0.88);
+                font-family: "Microsoft YaHei";
+                font-weight: 600;
+            }
+            QCalendarWidget#modernCalendar QSpinBox:hover,
+            QCalendarWidget#modernCalendar QComboBox:hover {
+                border: 1px solid rgba(22, 119, 255, 0.35);
                 background: #FFFFFF;
-                selection-background-color: #1677FF;
-                selection-color: #FFFFFF;
-                outline: 0;
             }
-            QCalendarWidget QAbstractItemView:enabled:hover {
-                background: rgba(22, 119, 255, 0.08);
+            QCalendarWidget#modernCalendar QTableView#modernCalendarTable {
+                background: #FFFFFF;
+                border: none;
+                outline: 0;
+                selection-background-color: transparent;
+            }
+            QCalendarWidget#modernCalendar QHeaderView::section {
+                background: transparent;
+                border: none;
+                color: rgba(0, 0, 0, 0.45);
+                font-family: "Microsoft YaHei";
+                font-size: 12px;
+                font-weight: 600;
+                padding: 6px 0 10px 0;
             }
             """
         )
