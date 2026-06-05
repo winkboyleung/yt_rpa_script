@@ -21,9 +21,14 @@ from utils.punch_config import (
     is_auto_workday_present,
 )
 
-# 文件路径
-INPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/6月打卡.xls"
-OUTPUT_FILE = "/Applications/ramsey_leung_files/all_files_from_redmi/yt_rpa_script/files/六月打卡异常.xlsx"
+FILES_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "files"
+)
+
+# ── PyCharm 右击「运行」默认配置 ──
+INPUT_FILE = os.path.join(FILES_DIR, "6月打卡.xls")
+OUTPUT_FILE = os.path.join(FILES_DIR, "6月打卡异常.xlsx")
+# ── 以上默认值 ──
 
 # 考勤规则
 WORK_START_TIME = time(8, 33, 59)
@@ -293,19 +298,8 @@ def analyze_attendance(input_file=None, output_file=None):
         print("\n未发现考勤异常")
 
 if __name__ == "__main__":
-    files_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "files"
-    )
     parser = argparse.ArgumentParser(description="考勤异常检测（整月打卡全量扫描）")
-    parser.add_argument(
-        "--input",
-        default=os.path.join(files_dir, "6月打卡.xls"),
-        help="打卡记录文件",
-    )
-    parser.add_argument(
-        "--output",
-        default=os.path.join(files_dir, "6月打卡异常.xlsx"),
-        help="异常输出文件",
-    )
+    parser.add_argument("--input", default=INPUT_FILE, help="打卡记录文件")
+    parser.add_argument("--output", default=OUTPUT_FILE, help="异常输出文件")
     args = parser.parse_args()
     analyze_attendance(args.input, args.output)

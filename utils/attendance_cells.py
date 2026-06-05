@@ -207,3 +207,29 @@ def compute_overtime_cell(
                 f"{punch_date.strftime('%Y/%m/%d')}\n{info['ref_time']}\n缺卡"
             )
     return None, None
+
+
+def compute_agency_template_daily_cell(
+    punch_date,
+    emp_punches_by_date,
+    emp_anomalies,
+    emp_anomaly_details,
+):
+    """
+    中介模版每日一格：工时数字 / 0（未上班）/ 异（缺卡等）。
+    """
+    if punch_date in emp_anomalies:
+        lines = []
+        for detail in emp_anomaly_details.get(punch_date, []):
+            lines.append(
+                f"{punch_date.strftime('%Y/%m/%d')}\n{detail['时间']}\n{detail['异常']}"
+            )
+        comment = "\n\n".join(lines) if lines else None
+        return "异", comment
+
+    hours = calc_agency_hours_for_shift_end_date(
+        emp_punches_by_date, punch_date
+    )
+    if hours is not None and hours > 0:
+        return _format_overtime_hours(hours), None
+    return 0, None
