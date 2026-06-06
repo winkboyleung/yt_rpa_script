@@ -22,7 +22,7 @@ from PySide6.QtCore import (
     Signal,
     Qt,
 )
-from PySide6.QtGui import QColor, QFont, QPainter, QPixmap, QPolygon
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QPolygon
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -59,6 +59,22 @@ from script.fill_attendance_template import fill_attendance_template  # noqa: E4
 
 FILE_OPEN_MESSAGE = "文件正在打开，操作前请先关闭。"
 ANOMALY_FILE_PATTERN = "打卡异常_*.xlsx"
+# 优先 PNG，避免 ICO 多尺寸在标题栏显示不一致
+APP_ICON_NAMES = ("app_icon.png", "app_icon.ico")
+
+
+def _resource_path(filename: str) -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / filename
+    return Path(__file__).resolve().parent / filename
+
+
+def _load_app_icon() -> QIcon | None:
+    for name in APP_ICON_NAMES:
+        path = _resource_path(name)
+        if path.exists():
+            return QIcon(str(path))
+    return None
 
 
 def _cleanup_anomaly_files(out_dir: str, log) -> None:
@@ -319,6 +335,9 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("考勤自动填表")
+        icon = _load_app_icon()
+        if icon is not None:
+            self.setWindowIcon(icon)
         self.setMinimumSize(1280, 1020)
 
         self._thread: QThread | None = None
@@ -774,6 +793,9 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    icon = _load_app_icon()
+    if icon is not None:
+        app.setWindowIcon(icon)
     _dropdown_arrow_image_url("dropdown_arrow_down.png")
     _dropdown_arrow_image_url("dropdown_arrow_up.png", upward=True)
     w = MainWindow()

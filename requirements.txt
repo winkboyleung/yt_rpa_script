@@ -4,3 +4,4 @@ chinese-calendar
 xlrd
 PySide6
 pyinstaller
+pillow
