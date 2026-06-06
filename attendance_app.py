@@ -23,7 +23,7 @@ from PySide6.QtCore import (
     Signal,
     Qt,
 )
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QPolygon
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPixmap, QPolygon
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -347,26 +347,57 @@ class FlowLayout(QLayout):
 
 
 class NameTagChip(QWidget):
+    """姓名下方蓝色椭圆底色，右上角删除按钮。"""
+
     remove_requested = Signal(str)
+    _BADGE_BLUE = QColor(22, 119, 255)
+    _PAD_H = 14
+    _PAD_V = 5
 
     def __init__(self, name: str, parent=None):
         super().__init__(parent)
         self._name = name
         self.setObjectName("nameTagChip")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 4, 2, 4)
-        layout.setSpacing(4)
+        self._font = QFont("Microsoft YaHei", 10)
 
-        label = QLabel(name)
-        label.setFont(QFont("Microsoft YaHei", 10))
-        remove_btn = QPushButton("×")
-        remove_btn.setObjectName("tagRemoveBtn")
-        remove_btn.setFixedSize(18, 18)
-        remove_btn.setCursor(Qt.PointingHandCursor)
-        remove_btn.clicked.connect(lambda: self.remove_requested.emit(self._name))
+        self._remove_btn = QPushButton("×", self)
+        self._remove_btn.setObjectName("tagRemoveBtn")
+        self._remove_btn.setFixedSize(18, 18)
+        self._remove_btn.setCursor(Qt.PointingHandCursor)
+        self._remove_btn.clicked.connect(lambda: self.remove_requested.emit(self._name))
+        self._sync_geometry()
 
-        layout.addWidget(label)
-        layout.addWidget(remove_btn)
+    def _badge_metrics(self) -> tuple[QRect, int, int]:
+        fm = QFontMetrics(self._font)
+        badge_w = fm.horizontalAdvance(self._name) + self._PAD_H * 2
+        badge_h = fm.height() + self._PAD_V * 2
+        chip_w = badge_w + 8
+        chip_h = badge_h + 10
+        badge_y = chip_h - badge_h
+        return QRect(0, badge_y, badge_w, badge_h), chip_w, chip_h
+
+    def _sync_geometry(self):
+        badge_rect, chip_w, chip_h = self._badge_metrics()
+        self.setFixedSize(chip_w, chip_h)
+        self._remove_btn.move(chip_w - self._remove_btn.width() + 2, 0)
+        self._badge_rect = badge_rect
+
+    def sizeHint(self) -> QSize:
+        _, chip_w, chip_h = self._badge_metrics()
+        return QSize(chip_w, chip_h)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        radius = self._badge_rect.height() / 2
+        painter.setBrush(self._BADGE_BLUE)
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(self._badge_rect, radius, radius)
+
+        painter.setFont(self._font)
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(self._badge_rect, Qt.AlignCenter, self._name)
 
 
 class OfficeOvertimeNamesPanel(QWidget):
@@ -774,9 +805,7 @@ class MainWindow(QMainWindow):
                 background: #FFFFFF;
             }
             QWidget#nameTagChip {
-                background: rgba(22, 119, 255, 0.10);
-                border: 1px solid rgba(22, 119, 255, 0.28);
-                border-radius: 14px;
+                background: transparent;
             }
             QPushButton#tagRemoveBtn {
                 background: transparent;
