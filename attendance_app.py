@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QListView,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QStyle,
@@ -56,6 +57,13 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from script.rpa_4_clock_in import analyze_attendance  # noqa: E402
 from script.fill_attendance_template import fill_attendance_template  # noqa: E402
+from utils.office_overtime_config import (  # noqa: E402
+    load_office_overtime_employees,
+    names_to_text,
+    parse_names_text,
+    save_office_overtime_employees,
+)
+from utils.workday_overtime import set_workday_overtime_employees  # noqa: E402
 
 FILE_OPEN_MESSAGE = "文件正在打开，操作前请先关闭。"
 ANOMALY_FILE_PATTERN = "打卡异常_*.xlsx"
@@ -268,6 +276,7 @@ class RunParams:
     template_path: str
     target_date: date
     lookback_days: int
+    office_overtime_employees: tuple[str, ...]
 
 
 class RunnerWorker(QObject):
@@ -312,6 +321,10 @@ class RunnerWorker(QObject):
         self.log.emit(f"- 模板文件：{p.template_path}")
         self.log.emit(f"- 目标日期：{p.target_date.isoformat()}")
         self.log.emit(f"- 回溯天数：{p.lookback_days}")
+        set_workday_overtime_employees(p.office_overtime_employees)
+        self.log.emit(
+            f"- 办公室加班名单：{len(p.office_overtime_employees)} 人"
+        )
 
         # fill_attendance_template 的 reference_date 语义是“参考日”，实际写入的是参考日前 N 天
         reference_date = p.target_date + timedelta(days=1)
@@ -465,15 +478,43 @@ class MainWindow(QMainWindow):
         return row
 
     def _build_log_group(self) -> QWidget:
-        gb = QGroupBox("运行日志")
-        gb.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
-        vl = QVBoxLayout(gb)
-        vl.setContentsMargins(10, 10, 10, 10)
+        panel = QWidget()
+        panel.setObjectName("bottomPanel")
+        hl = QHBoxLayout(panel)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(12)
+
+        left = QVBoxLayout()
+        left.setSpacing(8)
+        overtime_title = QLabel("办公室加班名单")
+        overtime_title.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
+        self.overtime_names_edit = QPlainTextEdit()
+        self.overtime_names_edit.setObjectName("overtimeNamesEdit")
+        self.overtime_names_edit.setPlaceholderText("莫淑兰\n许丽霞\n刘天梅")
+        self.overtime_names_edit.setFont(QFont("Microsoft YaHei", 10))
+        self.overtime_names_edit.setPlainText(
+            names_to_text(load_office_overtime_employees())
+        )
+        self.save_overtime_btn = QPushButton("保存名单")
+        self.save_overtime_btn.setMinimumHeight(32)
+        self.save_overtime_btn.clicked.connect(self._save_office_overtime_names)
+        left.addWidget(overtime_title)
+        left.addWidget(self.overtime_names_edit, stretch=1)
+        left.addWidget(self.save_overtime_btn)
+
+        right = QVBoxLayout()
+        right.setSpacing(8)
+        log_title = QLabel("运行日志")
+        log_title.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
         self.log_edit.setFont(QFont("Consolas", 10))
-        vl.addWidget(self.log_edit)
-        return gb
+        right.addWidget(log_title)
+        right.addWidget(self.log_edit, stretch=1)
+
+        hl.addLayout(left, stretch=2)
+        hl.addLayout(right, stretch=3)
+        return panel
 
     def _apply_ding_style(self):
         # 简洁的“钉钉风格”蓝色主题（不依赖外部资源）
@@ -493,14 +534,14 @@ class MainWindow(QMainWindow):
                 color: rgba(0,0,0,0.75);
             }
             QLabel { color: rgba(0,0,0,0.85); font-family: "Microsoft YaHei"; }
-            QLineEdit#formLineEdit, QTextEdit {
+            QLineEdit#formLineEdit, QTextEdit, QPlainTextEdit#overtimeNamesEdit {
                 background: #FFFFFF;
                 border: 1px solid rgba(0,0,0,0.12);
                 border-radius: 8px;
                 padding: 8px 10px;
                 selection-background-color: #1677FF;
             }
-            QLineEdit#formLineEdit:focus, QTextEdit:focus {
+            QLineEdit#formLineEdit:focus, QTextEdit:focus, QPlainTextEdit#overtimeNamesEdit:focus {
                 border: 1px solid #1677FF;
             }
             QPushButton {
@@ -519,8 +560,7 @@ class MainWindow(QMainWindow):
         )
 
         # 次按钮做“描边”风格
-        self.clear_btn.setStyleSheet(
-            """
+        secondary_btn_style = """
             QPushButton {
                 background: #FFFFFF;
                 color: #1677FF;
@@ -532,8 +572,9 @@ class MainWindow(QMainWindow):
             }
             QPushButton:hover { background: rgba(22,119,255,0.06); }
             QPushButton:pressed { background: rgba(22,119,255,0.12); }
-            """
-        )
+        """
+        self.clear_btn.setStyleSheet(secondary_btn_style)
+        self.save_overtime_btn.setStyleSheet(secondary_btn_style)
 
     def _style_premium_controls(self):
         arrow_down = _dropdown_arrow_image_url("dropdown_arrow_down.png")
@@ -725,6 +766,22 @@ class MainWindow(QMainWindow):
         self.log_edit.append(text)
         self.log_edit.verticalScrollBar().setValue(self.log_edit.verticalScrollBar().maximum())
 
+    def _current_office_overtime_names(self) -> list[str]:
+        return parse_names_text(self.overtime_names_edit.toPlainText())
+
+    def _save_office_overtime_names(self):
+        names = self._current_office_overtime_names()
+        if not names:
+            QMessageBox.warning(self, "提示", "请至少填写一位员工姓名。")
+            return
+        path = save_office_overtime_employees(names)
+        self.overtime_names_edit.setPlainText(names_to_text(names))
+        QMessageBox.information(
+            self,
+            "已保存",
+            f"办公室加班名单已保存（{len(names)} 人）。\n{path}",
+        )
+
     def _set_running(self, running: bool):
         self.start_btn.setDisabled(running)
         self.punch_btn.setDisabled(running)
@@ -733,6 +790,8 @@ class MainWindow(QMainWindow):
         self.template_edit.setDisabled(running)
         self.date_edit.setDisabled(running)
         self.lookback_combo.setDisabled(running)
+        self.overtime_names_edit.setDisabled(running)
+        self.save_overtime_btn.setDisabled(running)
 
     def _start(self):
         punch = self.punch_edit.text().strip()
@@ -743,15 +802,22 @@ class MainWindow(QMainWindow):
 
         target = _qdate_to_date(self.date_edit.date())
         days = int(self.lookback_combo.currentData())
+        office_names = self._current_office_overtime_names()
+        if not office_names:
+            QMessageBox.warning(self, "提示", "请填写办公室加班名单（每行一个姓名）。")
+            return
+        save_office_overtime_employees(office_names)
 
         params = RunParams(
             punch_path=punch,
             template_path=template,
             target_date=target,
             lookback_days=days,
+            office_overtime_employees=tuple(office_names),
         )
 
         self._append_log("开始执行…")
+        self._append_log(f"办公室加班名单：{len(office_names)} 人")
         self._set_running(True)
 
         self._thread = QThread()

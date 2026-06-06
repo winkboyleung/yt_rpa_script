@@ -12,25 +12,18 @@ from utils.night_shift import (
     check_four_punch_night_anomaly,
 )
 from utils.agency_attendance import collect_agency_check_dates
+from utils.office_overtime_config import DEFAULT_OFFICE_OVERTIME_EMPLOYEES
 
-TARGET_WORKDAY_OVERTIME_EMPLOYEES = {
-    "莫淑兰",
-    "许丽霞",
-    "刘天梅",
-    "朱颖",
-    "梁海雯",
-    "罗鼎成",
-    "吴金娜",
-    "杨丽娟",
-    "梅宇轩",
-    "周映文",
-    "林芷珊",
-    "王李婷",
-    "陈燕兰",
-}
+TARGET_WORKDAY_OVERTIME_EMPLOYEES = set(DEFAULT_OFFICE_OVERTIME_EMPLOYEES)
 
 # 由 refresh_workday_six_punch_employees_from_df 根据打卡表动态填充
 TARGET_WORKDAY_SIX_PUNCH_EMPLOYEES = set()
+
+
+def set_workday_overtime_employees(employees):
+    """设置办公室工作日加班名单。"""
+    global TARGET_WORKDAY_OVERTIME_EMPLOYEES
+    TARGET_WORKDAY_OVERTIME_EMPLOYEES = set(employees)
 
 
 def set_workday_six_punch_employees(employees):
