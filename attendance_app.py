@@ -17,6 +17,7 @@ from PySide6.QtCore import (
     QPoint,
     QPropertyAnimation,
     QRect,
+    QSize,
     QThread,
     QTimer,
     Signal,
@@ -36,12 +37,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLayout,
     QLineEdit,
     QListView,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStyle,
     QStyledItemDelegate,
@@ -59,8 +61,6 @@ from script.rpa_4_clock_in import analyze_attendance  # noqa: E402
 from script.fill_attendance_template import fill_attendance_template  # noqa: E402
 from utils.office_overtime_config import (  # noqa: E402
     load_office_overtime_employees,
-    names_to_text,
-    parse_names_text,
     save_office_overtime_employees,
 )
 from utils.workday_overtime import set_workday_overtime_employees  # noqa: E402
@@ -268,6 +268,237 @@ class SmoothDateEdit(QDateEdit):
                 popup.setObjectName("calendarPopup")
                 QTimer.singleShot(0, lambda p=popup: _run_popup_open_animation(p))
         return super().eventFilter(obj, event)
+
+
+class FlowLayout(QLayout):
+    """简单流式布局，用于姓名标签自动换行。"""
+
+    def __init__(self, parent=None, h_spacing=8, v_spacing=8):
+        super().__init__(parent)
+        self._items: list = []
+        self._h_spacing = h_spacing
+        self._v_spacing = v_spacing
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientations()
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only):
+        margins = self.contentsMargins()
+        x = rect.x() + margins.left()
+        y = rect.y() + margins.top()
+        line_height = 0
+        max_width = rect.width() - margins.left() - margins.right()
+
+        for item in self._items:
+            widget = item.widget()
+            if widget is None:
+                continue
+            space_x = self._h_spacing
+            space_y = self._v_spacing
+            item_size = item.sizeHint()
+            next_x = x + item_size.width() + space_x
+            if next_x - space_x > rect.x() + margins.left() + max_width and line_height > 0:
+                x = rect.x() + margins.left()
+                y += line_height + space_y
+                next_x = x + item_size.width() + space_x
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item_size))
+            x = next_x
+            line_height = max(line_height, item_size.height())
+        return y + line_height - rect.y() + margins.bottom()
+
+
+class NameTagChip(QWidget):
+    remove_requested = Signal(str)
+
+    def __init__(self, name: str, parent=None):
+        super().__init__(parent)
+        self._name = name
+        self.setObjectName("nameTagChip")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 4, 2, 4)
+        layout.setSpacing(4)
+
+        label = QLabel(name)
+        label.setFont(QFont("Microsoft YaHei", 10))
+        remove_btn = QPushButton("×")
+        remove_btn.setObjectName("tagRemoveBtn")
+        remove_btn.setFixedSize(18, 18)
+        remove_btn.setCursor(Qt.PointingHandCursor)
+        remove_btn.clicked.connect(lambda: self.remove_requested.emit(self._name))
+
+        layout.addWidget(label)
+        layout.addWidget(remove_btn)
+
+
+class OfficeOvertimeNamesPanel(QWidget):
+    """办公室加班名单：标签展示 + 新增 + 删除确认。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._names: list[str] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(8)
+
+        toolbar = QHBoxLayout()
+        self.add_btn = QPushButton("新增")
+        self.add_btn.setMinimumHeight(32)
+        self.add_btn.clicked.connect(self._toggle_add_input)
+        toolbar.addWidget(self.add_btn)
+        toolbar.addStretch(1)
+        root.addLayout(toolbar)
+
+        self.input_row = QWidget()
+        input_layout = QHBoxLayout(self.input_row)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(8)
+        self.name_input = QLineEdit()
+        self.name_input.setObjectName("overtimeNameInput")
+        self.name_input.setPlaceholderText("请输入员工姓名")
+        self.name_input.returnPressed.connect(self._confirm_add_name)
+        self.confirm_add_btn = QPushButton("确定")
+        self.confirm_add_btn.setMinimumHeight(32)
+        self.cancel_add_btn = QPushButton("取消")
+        self.cancel_add_btn.setMinimumHeight(32)
+        self.confirm_add_btn.clicked.connect(self._confirm_add_name)
+        self.cancel_add_btn.clicked.connect(self._hide_add_input)
+        input_layout.addWidget(self.name_input, stretch=1)
+        input_layout.addWidget(self.confirm_add_btn)
+        input_layout.addWidget(self.cancel_add_btn)
+        self.input_row.hide()
+        root.addWidget(self.input_row)
+
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("overtimeTagsScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.tags_host = QWidget()
+        self.tags_host.setObjectName("overtimeTagsHost")
+        self.tags_layout = FlowLayout(self.tags_host, h_spacing=8, v_spacing=8)
+        self.tags_host.setLayout(self.tags_layout)
+        self.scroll.setWidget(self.tags_host)
+        root.addWidget(self.scroll, stretch=1)
+
+        self.set_names(load_office_overtime_employees())
+
+    def names(self) -> list[str]:
+        return list(self._names)
+
+    def set_names(self, names: list[str]):
+        self._names = []
+        seen: set[str] = set()
+        for name in names:
+            cleaned = name.strip()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                self._names.append(cleaned)
+        self._rebuild_tags()
+
+    def set_panel_enabled(self, enabled: bool):
+        self.add_btn.setEnabled(enabled)
+        self.name_input.setEnabled(enabled)
+        self.confirm_add_btn.setEnabled(enabled)
+        self.cancel_add_btn.setEnabled(enabled)
+        self.scroll.setEnabled(enabled)
+        for i in range(self.tags_layout.count()):
+            item = self.tags_layout.itemAt(i)
+            if item and item.widget():
+                item.widget().setEnabled(enabled)
+
+    def _toggle_add_input(self):
+        if self.input_row.isVisible():
+            self._hide_add_input()
+            return
+        self.input_row.show()
+        self.name_input.clear()
+        self.name_input.setFocus()
+
+    def _hide_add_input(self):
+        self.input_row.hide()
+        self.name_input.clear()
+
+    def _confirm_add_name(self):
+        name = self.name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "提示", "请输入员工姓名。")
+            return
+        if name in self._names:
+            QMessageBox.information(self, "提示", f"「{name}」已在加班名单中。")
+            return
+        self._names.append(name)
+        self._rebuild_tags()
+        self._persist()
+        self.name_input.clear()
+        self.name_input.setFocus()
+
+    def _rebuild_tags(self):
+        while self.tags_layout.count():
+            item = self.tags_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+        for name in self._names:
+            chip = NameTagChip(name, self.tags_host)
+            chip.remove_requested.connect(self._confirm_remove_name)
+            self.tags_layout.addWidget(chip)
+        self.tags_host.adjustSize()
+
+    def _confirm_remove_name(self, name: str):
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定从加班名单中删除「{name}」吗？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        if name in self._names:
+            self._names.remove(name)
+        self._rebuild_tags()
+        self._persist()
+
+    def _persist(self):
+        save_office_overtime_employees(self._names)
 
 
 @dataclass(frozen=True)
@@ -488,19 +719,9 @@ class MainWindow(QMainWindow):
         left.setSpacing(8)
         overtime_title = QLabel("办公室加班名单")
         overtime_title.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
-        self.overtime_names_edit = QPlainTextEdit()
-        self.overtime_names_edit.setObjectName("overtimeNamesEdit")
-        self.overtime_names_edit.setPlaceholderText("莫淑兰\n许丽霞\n刘天梅")
-        self.overtime_names_edit.setFont(QFont("Microsoft YaHei", 10))
-        self.overtime_names_edit.setPlainText(
-            names_to_text(load_office_overtime_employees())
-        )
-        self.save_overtime_btn = QPushButton("保存名单")
-        self.save_overtime_btn.setMinimumHeight(32)
-        self.save_overtime_btn.clicked.connect(self._save_office_overtime_names)
+        self.overtime_panel = OfficeOvertimeNamesPanel()
         left.addWidget(overtime_title)
-        left.addWidget(self.overtime_names_edit, stretch=1)
-        left.addWidget(self.save_overtime_btn)
+        left.addWidget(self.overtime_panel, stretch=1)
 
         right = QVBoxLayout()
         right.setSpacing(8)
@@ -534,15 +755,41 @@ class MainWindow(QMainWindow):
                 color: rgba(0,0,0,0.75);
             }
             QLabel { color: rgba(0,0,0,0.85); font-family: "Microsoft YaHei"; }
-            QLineEdit#formLineEdit, QTextEdit, QPlainTextEdit#overtimeNamesEdit {
+            QLineEdit#formLineEdit, QLineEdit#overtimeNameInput, QTextEdit {
                 background: #FFFFFF;
                 border: 1px solid rgba(0,0,0,0.12);
                 border-radius: 8px;
                 padding: 8px 10px;
                 selection-background-color: #1677FF;
             }
-            QLineEdit#formLineEdit:focus, QTextEdit:focus, QPlainTextEdit#overtimeNamesEdit:focus {
+            QLineEdit#formLineEdit:focus, QLineEdit#overtimeNameInput:focus, QTextEdit:focus {
                 border: 1px solid #1677FF;
+            }
+            QScrollArea#overtimeTagsScroll {
+                background: #FFFFFF;
+                border: 1px solid rgba(0,0,0,0.12);
+                border-radius: 8px;
+            }
+            QWidget#overtimeTagsHost {
+                background: #FFFFFF;
+            }
+            QWidget#nameTagChip {
+                background: rgba(22, 119, 255, 0.10);
+                border: 1px solid rgba(22, 119, 255, 0.28);
+                border-radius: 14px;
+            }
+            QPushButton#tagRemoveBtn {
+                background: transparent;
+                color: rgba(0, 0, 0, 0.45);
+                border: none;
+                border-radius: 9px;
+                font-size: 14px;
+                font-weight: 600;
+                padding: 0;
+            }
+            QPushButton#tagRemoveBtn:hover {
+                background: rgba(0, 0, 0, 0.08);
+                color: #FF4D4F;
             }
             QPushButton {
                 background: #1677FF;
@@ -574,7 +821,8 @@ class MainWindow(QMainWindow):
             QPushButton:pressed { background: rgba(22,119,255,0.12); }
         """
         self.clear_btn.setStyleSheet(secondary_btn_style)
-        self.save_overtime_btn.setStyleSheet(secondary_btn_style)
+        self.overtime_panel.cancel_add_btn.setStyleSheet(secondary_btn_style)
+        self.overtime_panel.confirm_add_btn.setStyleSheet(secondary_btn_style)
 
     def _style_premium_controls(self):
         arrow_down = _dropdown_arrow_image_url("dropdown_arrow_down.png")
@@ -766,22 +1014,6 @@ class MainWindow(QMainWindow):
         self.log_edit.append(text)
         self.log_edit.verticalScrollBar().setValue(self.log_edit.verticalScrollBar().maximum())
 
-    def _current_office_overtime_names(self) -> list[str]:
-        return parse_names_text(self.overtime_names_edit.toPlainText())
-
-    def _save_office_overtime_names(self):
-        names = self._current_office_overtime_names()
-        if not names:
-            QMessageBox.warning(self, "提示", "请至少填写一位员工姓名。")
-            return
-        path = save_office_overtime_employees(names)
-        self.overtime_names_edit.setPlainText(names_to_text(names))
-        QMessageBox.information(
-            self,
-            "已保存",
-            f"办公室加班名单已保存（{len(names)} 人）。\n{path}",
-        )
-
     def _set_running(self, running: bool):
         self.start_btn.setDisabled(running)
         self.punch_btn.setDisabled(running)
@@ -790,8 +1022,7 @@ class MainWindow(QMainWindow):
         self.template_edit.setDisabled(running)
         self.date_edit.setDisabled(running)
         self.lookback_combo.setDisabled(running)
-        self.overtime_names_edit.setDisabled(running)
-        self.save_overtime_btn.setDisabled(running)
+        self.overtime_panel.set_panel_enabled(not running)
 
     def _start(self):
         punch = self.punch_edit.text().strip()
@@ -802,9 +1033,9 @@ class MainWindow(QMainWindow):
 
         target = _qdate_to_date(self.date_edit.date())
         days = int(self.lookback_combo.currentData())
-        office_names = self._current_office_overtime_names()
+        office_names = self.overtime_panel.names()
         if not office_names:
-            QMessageBox.warning(self, "提示", "请填写办公室加班名单（每行一个姓名）。")
+            QMessageBox.warning(self, "提示", "请至少添加一位办公室加班员工。")
             return
         save_office_overtime_employees(office_names)
 
