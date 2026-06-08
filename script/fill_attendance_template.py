@@ -146,8 +146,22 @@ def target_dates(year, month, reference_date, lookback_days):
     return sorted(dates)
 
 
-def apply_cell(ws, row, col, value, comment_text, number_format=None):
+def cell_has_content(cell):
+    """单元格已有内容（数字或中文等）则不再覆盖。"""
+    val = cell.value
+    if val is None:
+        return False
+    if isinstance(val, str) and not val.strip():
+        return False
+    return True
+
+
+def apply_cell(
+    ws, row, col, value, comment_text, number_format=None, only_if_empty=False
+):
     cell = ws.cell(row, col)
+    if only_if_empty and cell_has_content(cell):
+        return False
     cell.value = value
     if number_format is not None:
         cell.number_format = number_format
@@ -155,6 +169,7 @@ def apply_cell(ws, row, col, value, comment_text, number_format=None):
         cell.comment = Comment(comment_text, "系统")
     elif cell.comment:
         cell.comment = None
+    return True
 
 
 # 中介模版部分日期列带自定义格式 "夜"##，写入 0 时 Excel 会显示成「夜」
@@ -205,6 +220,7 @@ def _fill_office_template(
     month_start, month_end, agency_keys,
 ):
     filled_cells = 0
+    skipped_cells = 0
     for name, (att_row, ot_row) in name_to_rows.items():
         ctx = _load_employee_context(
             name, punch_df, anomaly_df, month_start, month_end, agency_keys
@@ -225,8 +241,12 @@ def _fill_office_template(
                 name=name,
             )
             if att_val is not None:
-                apply_cell(ws, att_row, col, att_val, att_comment)
-                filled_cells += 1
+                if apply_cell(
+                    ws, att_row, col, att_val, att_comment, only_if_empty=True
+                ):
+                    filled_cells += 1
+                else:
+                    skipped_cells += 1
 
             ot_val, ot_comment = compute_overtime_cell(
                 name,
@@ -238,12 +258,21 @@ def _fill_office_template(
                 ctx["is_four_punch"],
             )
             if ot_val is not None:
-                apply_cell(ws, ot_row, col, ot_val, ot_comment)
-                filled_cells += 1
+                if apply_cell(
+                    ws, ot_row, col, ot_val, ot_comment, only_if_empty=True
+                ):
+                    filled_cells += 1
+                else:
+                    skipped_cells += 1
             elif not is_holiday_or_weekend(punch_date):
-                apply_cell(ws, ot_row, col, None, None)
+                if apply_cell(
+                    ws, ot_row, col, None, None, only_if_empty=True
+                ):
+                    filled_cells += 1
+                else:
+                    skipped_cells += 1
 
-    return filled_cells
+    return filled_cells, skipped_cells
 
 
 def _fill_agency_template(
@@ -251,6 +280,7 @@ def _fill_agency_template(
     month_start, month_end, agency_keys,
 ):
     filled_cells = 0
+    skipped_cells = 0
     for name, row in name_to_row.items():
         ctx = _load_employee_context(
             name, punch_df, anomaly_df, month_start, month_end, agency_keys
@@ -266,13 +296,16 @@ def _fill_agency_template(
                 ctx["emp_anomalies"],
                 ctx["emp_anomaly_details"],
             )
-            apply_cell(
+            if apply_cell(
                 ws, row, col, val, comment,
                 number_format=AGENCY_DAY_CELL_NUMBER_FORMAT,
-            )
-            filled_cells += 1
+                only_if_empty=True,
+            ):
+                filled_cells += 1
+            else:
+                skipped_cells += 1
 
-    return filled_cells
+    return filled_cells, skipped_cells
 
 
 def fill_attendance_template(
@@ -327,18 +360,18 @@ def fill_attendance_template(
     print(f"参考日: {reference_date}，填写日期: {[d.isoformat() for d in dates_to_fill]}")
 
     if kind == TEMPLATE_KIND_AGENCY:
-        filled_cells = _fill_agency_template(
+        filled_cells, skipped_cells = _fill_agency_template(
             ws, name_map, day_to_col, dates_to_fill, punch_df, anomaly_df,
             month_start, month_end, agency_keys,
         )
     else:
-        filled_cells = _fill_office_template(
+        filled_cells, skipped_cells = _fill_office_template(
             ws, name_map, day_to_col, dates_to_fill, punch_df, anomaly_df,
             month_start, month_end, agency_keys,
         )
 
     wb.save(output_path)
-    print(f"已写入 {filled_cells} 个单元格")
+    print(f"已写入 {filled_cells} 个单元格，跳过 {skipped_cells} 个（已有内容）")
     print(f"已保存: {output_path}")
 
 
