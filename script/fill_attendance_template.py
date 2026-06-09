@@ -41,7 +41,7 @@ DEFAULT_TEMPLATE = os.path.join(FILES_DIR, "6月中介考勤模版.xlsx")
 DEFAULT_PUNCH = os.path.join(FILES_DIR, "6月打卡.xls")
 DEFAULT_ANOMALY = os.path.join(FILES_DIR, "6月打卡异常.xlsx")
 
-DEFAULT_LOOKBACK_DAYS = 4  # 1=仅昨天，2=前天+昨天，3=大前天+前天+昨天
+DEFAULT_LOOKBACK_DAYS = 1  # 1=仅昨天，2=前天+昨天，3=大前天+前天+昨天
 # ── 以上默认值 ──
 
 TEMPLATE_KIND_AGENCY = "agency"
@@ -55,8 +55,10 @@ OFFICE_NAME_COL = 2
 # 中介模版
 AGENCY_DAY_HEADER_ROW = 2
 AGENCY_DATA_START_ROW = 4
+AGENCY_STATUS_COL = 2
 AGENCY_NAME_COL = 3
 AGENCY_SKIP_NAMES = frozenset({"姓名", "宵夜"})
+AGENCY_SKIP_STATUS = frozenset({"离职", "自离"})
 
 
 def detect_template_kind(template_path):
@@ -114,6 +116,9 @@ def parse_agency_template_layout(ws):
             continue
         name = str(name).strip()
         if name in AGENCY_SKIP_NAMES:
+            continue
+        status = ws.cell(row, AGENCY_STATUS_COL).value
+        if status and str(status).strip() in AGENCY_SKIP_STATUS:
             continue
         name_to_row[name] = row
     return day_to_col, name_to_row
