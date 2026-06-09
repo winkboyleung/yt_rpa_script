@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 from openpyxl import load_workbook
+from openpyxl.cell.cell import MergedCell
 from openpyxl.comments import Comment
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,7 +34,7 @@ FILES_DIR = os.path.join(
 )
 
 # ── PyCharm 右击「运行」默认配置（改这里即可，不必配命令行参数）──
-DEFAULT_TEMPLATE = os.path.join(FILES_DIR, "6月中介考勤模版.xlsx")
+DEFAULT_TEMPLATE = os.path.join(FILES_DIR, "6月正式员工考勤模版.xlsx")
 # 换模板时改上一行，或取消下面某一行的注释：
 # DEFAULT_TEMPLATE = os.path.join(FILES_DIR, "6月正式员工考勤模版.xlsx")
 # DEFAULT_TEMPLATE = os.path.join(FILES_DIR, "6月中介考勤模版.xlsx")
@@ -165,6 +166,8 @@ def apply_cell(
     ws, row, col, value, comment_text, number_format=None, only_if_empty=False
 ):
     cell = ws.cell(row, col)
+    if isinstance(cell, MergedCell):
+        return False
     if only_if_empty and cell_has_content(cell):
         return False
     cell.value = value
@@ -376,7 +379,7 @@ def fill_attendance_template(
         )
 
     wb.save(output_path)
-    print(f"已写入 {filled_cells} 个单元格，跳过 {skipped_cells} 个（已有内容）")
+    print(f"已写入 {filled_cells} 个单元格，跳过 {skipped_cells} 个（已有内容或合并单元格）")
     print(f"已保存: {output_path}")
 
 
