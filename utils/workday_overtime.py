@@ -181,9 +181,8 @@ def calc_workday_overtime(name, date, emp_id, day_times, punches_by_date=None):
       - 4次打卡但基本卡不齐：异常
       - 5/6次等：用 group2_checker 识别加班下班卡；缺失则异常，否则工时=加班下班卡(向下取整)-18:00
     - 2次打卡：仅按末卡判断（首卡忽略）
-      - 末卡<=18:30：无加班，忽略
-      - 末卡>18:30：加班=末卡(向后取整)-17:30
-        - 若工时<2：按原值
+      - 末卡向后取整后<18:00：无加班
+      - 末卡向后取整后>=18:00：加班=取整末卡-17:30
         - 若工时>=2：减0.5小时晚餐
     - 4次打卡：取排序后第3次/第4次作为加班上班卡/下班卡，计算工时
     - 3次打卡（>2且<4）：标记异常
@@ -259,16 +258,11 @@ def calc_workday_overtime(name, date, emp_id, day_times, punches_by_date=None):
     if count == 2:
         sorted_times = sorted(day_times)
         clock_out = sorted_times[1]
-
-        # 下班卡在18:30内视为无加班
-        if _time_to_minutes(clock_out) <= 18 * 60 + 30:
-            return {"status": "正常", "hours": 0, "reason": "下班卡不晚于18:30，无加班"}
-
         end_mins = _round_overtime_end_backward(clock_out)
-        base_start = 17 * 60 + 30
-        if end_mins <= base_start:
-            return {"status": "正常", "hours": 0, "reason": "取整后下班时间不晚于17:30"}
+        if end_mins < 18 * 60:
+            return {"status": "正常", "hours": 0, "reason": "下班取整后不晚于18:00，无加班"}
 
+        base_start = 17 * 60 + 30
         hours = (end_mins - base_start) / 60.0
         if hours >= 2:
             hours -= 0.5

@@ -34,7 +34,7 @@ FILES_DIR = os.path.join(
 )
 
 # ── PyCharm 右击「运行」默认配置（改这里即可，不必配命令行参数）──
-DEFAULT_TEMPLATE = os.path.join(FILES_DIR, "6月正式员工考勤模版.xlsx")
+DEFAULT_TEMPLATE = os.path.join(FILES_DIR, "6月办公室考勤模版.xlsx")
 # 换模板时改上一行，或取消下面某一行的注释：
 # DEFAULT_TEMPLATE = os.path.join(FILES_DIR, "6月正式员工考勤模版.xlsx")
 # DEFAULT_TEMPLATE = os.path.join(FILES_DIR, "6月中介考勤模版.xlsx")
@@ -42,7 +42,7 @@ DEFAULT_TEMPLATE = os.path.join(FILES_DIR, "6月正式员工考勤模版.xlsx")
 DEFAULT_PUNCH = os.path.join(FILES_DIR, "6月打卡.xls")
 DEFAULT_ANOMALY = os.path.join(FILES_DIR, "6月打卡异常.xlsx")
 
-DEFAULT_LOOKBACK_DAYS = 1  # 1=仅昨天，2=前天+昨天，3=大前天+前天+昨天
+DEFAULT_LOOKBACK_DAYS = 9  # 1=仅昨天，2=前天+昨天，3=大前天+前天+昨天
 # ── 以上默认值 ──
 
 TEMPLATE_KIND_AGENCY = "agency"

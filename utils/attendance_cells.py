@@ -48,12 +48,32 @@ def calc_weekend_overtime_two_punches(clock_in, clock_out):
     if end <= start:
         return None
     hours = (end - start) / 60.0
-    need_lunch = _time_to_minutes(clock_in) < 11 * 60 and (
+    need_lunch = _time_to_minutes(clock_in) <= 11 * 60 and (
         hours > 5 or _time_to_minutes(clock_out) > 14 * 60
     )
     if need_lunch:
         hours -= 1
     if _time_to_minutes(clock_out) > 19 * 60 + 30:
+        hours -= 0.5
+    return hours
+
+
+def calc_weekend_overtime_four_punches(punch_times):
+    """周末/节假日、四次打卡：首末卡取整；午餐同两卡；末卡取整后>=19:30扣晚餐0.5。"""
+    if len(punch_times) != 4:
+        return None
+    clock_in, clock_out = punch_times[0], punch_times[-1]
+    start = _round_clock_in_forward(clock_in)
+    end = _round_clock_out_backward(clock_out)
+    if end <= start:
+        return None
+    hours = (end - start) / 60.0
+    need_lunch = _time_to_minutes(clock_in) <= 11 * 60 and (
+        hours > 5 or _time_to_minutes(clock_out) > 14 * 60
+    )
+    if need_lunch:
+        hours -= 1
+    if end >= 19 * 60 + 30:
         hours -= 0.5
     return hours
 
@@ -181,6 +201,10 @@ def compute_overtime_cell(
             hours = calc_weekend_overtime_two_punches(
                 day_times[0], day_times[1]
             )
+            if hours is not None and hours > 0:
+                return _format_overtime_hours(hours), None
+        elif len(day_times) == 4:
+            hours = calc_weekend_overtime_four_punches(day_times)
             if hours is not None and hours > 0:
                 return _format_overtime_hours(hours), None
         return None, None
